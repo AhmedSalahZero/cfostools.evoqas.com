@@ -511,31 +511,7 @@ class Loans2Controller extends Controller
 
 		dd($time,$end);
 		
-		// /**
-		//  * @var Amp\Future $future
-		//  */
-		// Our functions have been queued, but won't be executed until the event-loop gains control.
-		// echo "Let's start: ";
-		// Awaiting a future outside a fiber switches to the event loop until the future is complete.
-		// Once the event loop gains control, it executes our already queued functions we've passed to async()
-		// $future->await();
-		// $pool = Pool::create()->concurrency(1000);
-		// for($i = 0 ; $i<200  ; $i++){
-		// 	$calculateFixedLoanAtEndService->__calculate($loanType,$loanStartDate,$loanAmount,$baseRate,$marginRate,$tenor,$installmentPaymentIntervalName,$stepUpRate,$stepUpIntervalName,$stepDownRate,$stepDownIntervalName,$gracePeriod);
-		// }
-	  
-// 		for($i = 0 ; $i<60  ; $i++){
-// 			$pool->add(function () use ($i,$calculateFixedLoanAtEndService,$loanType,$loanStartDate,$loanAmount,$baseRate,$marginRate,$tenor,$installmentPaymentIntervalName,$stepUpRate,$stepUpIntervalName,$stepDownRate,$stepDownIntervalName,$gracePeriod) {
-// 				$result = $calculateFixedLoanAtEndService->__calculate($loanType,$loanStartDate,$loanAmount,$baseRate,$marginRate,$tenor,$installmentPaymentIntervalName,$stepUpRate,$stepUpIntervalName,$stepDownRate,$stepDownIntervalName,$gracePeriod);
-// 				return $result;
-// 			});	
-			
-// 		}
-		
-		
-
-// $results = $pool->wait();
-// dd($results);
+	
 		
 		$fixedAtEndResult=  $calculateFixedLoanAtEndService->__calculate($loanType,$loanStartDate,$loanAmount,$baseRate,$marginRate,$tenor,$installmentPaymentIntervalName,$stepUpRate,$stepUpIntervalName,$stepDownRate,$stepDownIntervalName,$gracePeriod);
 		$loanDates = array_keys($fixedAtEndResult['beginning']);

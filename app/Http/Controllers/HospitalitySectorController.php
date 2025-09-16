@@ -2220,12 +2220,17 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		$dashboardItems = $hospitalitySector->calculateRoomRevenueAndGuestCount();
 		$reportItems = $this->formatDashboardReportItems($onlyMonthlyDashboardItems,$dashboardItems, $hospitalitySector,$operationStartDateAsIndex,$datesAsStringAndIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate,$dateWithDateIndex,$operationDates,$fixedAssetsLoan);
 		$studyDurationPerYear = $hospitalitySector->getStudyDurationPerYear($datesAsStringAndIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate,$dateWithMonthNumber,true, true, false);
+		
+		
+		// dd(array_merge([
+		// 		'Property Building'=>$reportItems['propertyAssetsForBuilding'],
+		// 		'Property FFE'=>$reportItems['propertyAssetsForFFE'],
+		// 	],$reportItems['ffeAssetItems']));
 		return view('admin.hospitality-sector.fixed-assets-statement', [
 			'company' => $company,
 			'reportItems' => array_merge([
 				'Property Building'=>$reportItems['propertyAssetsForBuilding'],
 				'Property FFE'=>$reportItems['propertyAssetsForFFE'],
-				
 			],$reportItems['ffeAssetItems']),
 			'hospitalitySector' => $hospitalitySector,
 			'dates' => $hospitalitySector->getOnlyDatesOfActiveStudy($studyDurationPerYear,$dateIndexWithDate),
@@ -2602,6 +2607,7 @@ $dateIndexWithDate =App('dateIndexWithDate');
 			$ffeLoanWithdrawalInterestAmounts = $dashboardItems['ffeLoanWithdrawalInterest']??[] ;
 			$ffeLoanInterestAmounts = $dashboardItems['ffeLoanInterestAmounts']??[] ;
 			$ffeExecutionAndPayment = $dashboardItems['ffeExecutionAndPayment']??[] ;
+		
 			$propertyFFECapitalizedInterest = $dashboardItems['propertyFFECapitalizedInterest'] ;
 			
 			$propertyAcquisition = $hospitalitySector->getPropertyAcquisition();
@@ -3151,7 +3157,6 @@ $dateIndexWithDate =App('dateIndexWithDate');
 	public function viewStudyDashboard(Request $request, $companyId, $hospitalitySectorId,$returnArr = false)
 	{
 		// $start = microtime(true);
-		
 		$revenueChartOnly = isset($request['is_ajax']) && $request->get('chart_name') == 'revenue-stream' ;
 		
 		$company = Company::find($companyId);
@@ -3184,7 +3189,10 @@ $dateIndexWithDate =App('dateIndexWithDate');
 				]);
 			}
 		}
+		
 		$reportItemsWithDashboardItems = $this->viewCashInOutReport($companyId , $hospitalitySectorId , true);
+		$workingCapitalInjection = $reportItemsWithDashboardItems['working_capital_injection'];
+		// dd($workingCapitalInjection);
 		$dashboardItems = $reportItemsWithDashboardItems['dashboardItems'];
 		$operationStartDateFormatted =$hospitalitySector->getOperationStartDateFormatted() ;
 		$datesAsStringAndIndex = $hospitalitySector->getDatesAsStringAndIndex();
@@ -3193,7 +3201,6 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		
 		$calculateFixedLoanAtEndService = new CalculateFixedLoanAtEndService($hospitalitySector);
 		$fixedAssetsLoan = $calculateFixedLoanAtEndService->calculateFixedAssetsLoans($hospitalitySector,$datesAsStringAndIndex,$dateIndexWithDate,$dateWithDateIndex);
-		
 		$onlyMonthlyDashboardItems = [];
 		
 		$operationDates = $hospitalitySector->getOperationDurationPerMonth($datesAsStringAndIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate,$dateWithMonthNumber);
@@ -3201,7 +3208,7 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		$reportItemsAnnually = $this->formatDashboardReportItems($onlyMonthlyDashboardItems,$dashboardItems, $hospitalitySector,$operationStartDateAsIndex,$datesAsStringAndIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate , $dateWithDateIndex,$operationDates,$fixedAssetsLoan, 'annually');
 		$operationDurationPerYear = $hospitalitySector->getOperationDurationPerYear($datesAsStringAndIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate,$dateWithMonthNumber);
 		
-		
+			
 		$revenueStreamType = $request->get('revenue_stream_type', 'Total Revenues');
 		$revenueStreamValue = Arr::get($reportItems, 'hotelRevenue.' . $revenueStreamType, []);
 		$totalRevenuesStreamPerYear = [];
@@ -3218,12 +3225,14 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		$revenueStreamChart = formatDataForChart($revenueStreamChartData);
 		$hotelRevenuesBreakdownChart = formatStackedChart(Arr::get($reportItems, 'hotelRevenue.Total Revenues.subItems', []), $datesIndexWithYearIndex,$yearIndexWithYear);
 		$adrChart=$this->calculateADR($dashboardItems['totalRoomRevenueOfEachYear']??[], $dashboardItems['totalRoomsSoldNightsPerYear']??[], $yearIndexWithYear);
+	
 		$adrChart=formatDataForChart($adrChart, true,true,false,[],$yearsWithItsMonths,true);
 		
 		$revparChart =$this->calculateREVPAR($dashboardItems['totalRoomRevenueOfEachYear']??[], $dashboardItems['totalMaxAvailableNightsPerYear']??[], $yearIndexWithYear);
 		$revparChart=formatDataForChart($revparChart, true,false,false,[],$yearsWithItsMonths);
 
 		$occupancyChart = $this->calculateOccupancyRate($dashboardItems['totalRoomsSoldNightsPerYear']??[], $dashboardItems['totalMaxPracticalAvailableNightsPerYear']??[], $yearIndexWithYear);
+		
 	
 		$occupancyChart = formatDataForChart($occupancyChart, true, false,false,[],$yearsWithItsMonths);
 
@@ -3263,17 +3272,24 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		
 		$netProfitChart = formatDataForChart($netProfitChartData,false , false , true , $revenueStreamValueForTotalHotelRevenueAnnually);
 		
-		
 		$reportItems = $this->formatCashInOutReportItems($dashboardItems,$hospitalitySector);
-		$workingCapitalInjection = $hospitalitySector->calculateWorkingCapitalInjection($reportItems['netCash']['Accumulated Net Cash'],$datesAsStringAndIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate); 
+	// ddddddddddd
+		// $workingCapitalInjection = $hospitalitySector->calculateWorkingCapitalInjection($reportItems['netCash']['Accumulated Net Cash'],$datesAsStringAndIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate,true); 
+		// dd($workingCapitalInjection);
+		// DD($workingCapitalInjection);
+		// dd('first',$workingCapitalInjection);
 		$dashboardItems['CashInReport']['Equity Injection']['Working Capital'] = $workingCapitalInjection ;
-		
-		
+		$totalEquityInjectionWithoutWorkingCapital = $dashboardItems['CashInReport']['Equity Injection'] ?? [];
+		$totalPreOperatingAndWorkingCapital = array_sum($totalEquityInjectionWithoutWorkingCapital['Working Capital'] ?? []);
+		unset($totalEquityInjectionWithoutWorkingCapital['Working Capital']);
+		$totalLoanWithdrawal = sumTwoDimArr($dashboardItems['CashInReport']['Loan Withdrawal']) ; 
+		$totalFixedAssetInvestment = $totalLoanWithdrawal + sumTwoDimArr($totalEquityInjectionWithoutWorkingCapital);
 		
 		
 		
 		
 		$totalEquityInjection = sumTwoDimArr($dashboardItems['CashInReport']['Equity Injection'] ?? []);
+
 		// $totalLoans = sumTwoDimArr($dashboardItems['CashInReport']['Loan Withdrawal'] ?? []) ;
 		$propertyLoanAmount = $dashboardItems['propertyLoanAmount'];
 		$landLoanAmount = $dashboardItems['landLoanAmount'];
@@ -3292,10 +3308,10 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		$hardConstructionLoanEndBalanceAtStudyEndDate  = $dashboardItems['hardConstructionLoanEndBalanceAtStudyEndDate'];
 		$ffeLoanEndBalanceAtStudyEndDate  = $dashboardItems['ffeLoanEndBalanceAtStudyEndDate'];
 		
-		
+		// dd($totalLoans);
 		$totalEndBalanceAtStudyEndDate = $propertyLoanEndBalanceAtStudyEndBalance +$landLoanEndBalanceAtStudyEndDate+ $hardConstructionLoanEndBalanceAtStudyEndDate + $ffeLoanEndBalanceAtStudyEndDate ;
-		
 		$totalRequiredInvestment = $totalEquityInjection+$totalLoans;
+
 		$costOfEquity = $hospitalitySector->getInvestmentReturnRate();
 		$corporateTaxesRate = $hospitalitySector->getCorporateTaxesRate()/100;
 		
@@ -3320,18 +3336,18 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		}
 		$irrService = new CalculateIrrService();
 		$netPresentValueForEquity = $irrService->calculateNetPresentValue($freeCashFlowForEquityAnnuallyWithTerminal,$costOfEquity);
+		// dd($netPresentValueForEquity , $freeCashFlowForEquityAnnuallyWithTerminal , $costOfEquity);
 		$mainFunctionalCurrency = $hospitalitySector->getMainFunctionalCurrencyFormatted();
 		// $irrForEquity = $irrService->calculateIrr($freeCashFlowForEquityAnnuallyWithTerminal,$costOfEquity,0,$netPresentValueForEquity);
 		$irrForEquity = Finance::irr(array_values($freeCashFlowForEquityAnnuallyWithTerminal));
 		// end Investment Feasibility For Equity
 		
 		// start Investment Feasibility For Project
-		
 		$freeCashFlowForFirm = $hospitalitySector->calculateFreeCashFlowForFirm($reportItems);
 		$freeCashFlowForFirmAnnually = sumIntervalsIndexes($freeCashFlowForFirm , 'annually',$hospitalitySector->financialYearStartMonth(),$dateIndexWithDate);
 		
 		$freeCashFlowForFirmAnnually = $hospitalitySector->removeDatesAfterDate($freeCashFlowForFirmAnnually,$hospitalitySector->getStudyEndDateAsIndex()) ;
-		
+
 		$terminalValueForFirm = Arr::last($freeCashFlowForFirmAnnually,null,0);
 		$waccPercentage = $wacc  ;
 		$waccMinusPerpetual = ($waccPercentage - $perpetualGrowthRate) <= 0   ? 1 : ($waccPercentage - $perpetualGrowthRate) ;
@@ -3340,10 +3356,12 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		$terminalValueForFirmMinusLoanBalance = $terminalValueForFirm  ; 
 		$freeCashFlowForFirmAnnuallyLastKey=array_key_last($freeCashFlowForFirmAnnually);
 		$freeCashFlowForFirmAnnuallyWithTerminal = $freeCashFlowForFirmAnnually;
+
 		
 		if($freeCashFlowForFirmAnnuallyLastKey){
 			$freeCashFlowForFirmAnnuallyWithTerminal[$freeCashFlowForFirmAnnuallyLastKey] = $freeCashFlowForFirmAnnuallyWithTerminal[$freeCashFlowForFirmAnnuallyLastKey]+ $terminalValueForFirmMinusLoanBalance;
 		}
+		
 		$waccPercentage = $waccPercentage * 100;
 		$netPresentValueForFirm = $irrService->calculateNetPresentValue($freeCashFlowForFirmAnnuallyWithTerminal,$waccPercentage);
 	
@@ -3363,6 +3381,14 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		$paybackDate = array_key_last($paybackDateAndValue);
 		$paybackValue = $paybackDateAndValue[$paybackDate] ?? 0;
 		$cardItems =[
+				[
+				'title'=>'Total Fixed Asset Investment',
+				'value'=>number_format($totalFixedAssetInvestment,0)
+			],
+			[
+				'title'=>'Pre-operating & Working Capital',
+				'value'=>number_format($totalPreOperatingAndWorkingCapital,0)
+			],
 			[
 				'title'=>'Total Required Investment',
 				'value'=>number_format($totalRequiredInvestment,0)
@@ -3375,6 +3401,7 @@ $dateIndexWithDate =App('dateIndexWithDate');
 				'title'=>'Total Loans',
 				'value'=>number_format($totalLoans,0)
 			],
+		 
 			[
 				'title'=>'WACC %',
 				'value'=>number_format($wacc*100 , 1) . ' %'
@@ -3587,10 +3614,12 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		
 		// must be last key added 
 		$workingCapitalInjection = $hospitalitySector->calculateWorkingCapitalInjection($reportItems['netCash']['Accumulated Net Cash'],$datesAsStringAndIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate); 
+	
 		$dashboardItems['CashInReport']['Equity Injection']['Working Capital'] = $workingCapitalInjection ;
 		$reportItems = $this->formatCashInOutReportItems($dashboardItems,$hospitalitySector,true);
 		if($returnReportItemsWithDashboardItems){
 			return [
+				'working_capital_injection'=>$workingCapitalInjection,
 				'dashboardItems'=>$dashboardItems,
 				'reportItems'=>$reportItems,
 				'finalReportItems'=>$finalReportItems,
@@ -3601,11 +3630,7 @@ $dateIndexWithDate =App('dateIndexWithDate');
 			];
 		}
 		
-		// for balance sheet 
-		 // $reportItems must be after working capital calculations;
-		// $freeCashFlowForEquity = $hospitalitySector->calculateFreeCashFlowForEquity($reportItems);
-		// $freeCashFlowForFirm = $hospitalitySector->calculateFreeCashFlowForFirm($reportItems);
-		
+	
 		
 ;
 		return view('admin.hospitality-sector.cash-in-out-report', [
@@ -3843,7 +3868,6 @@ $dateIndexWithDate =App('dateIndexWithDate');
 				$totalLongTermLoans= HArr::sumAtDates([$propertyLoanEndBalance,$landLoanEndBalance,$hardConstructionLoanEndBalance,$ffeLoanEndBalance],$studyDates);
 				$checkError = HArr::subtractAtDates([$totalInvestment,$totalLongTermLoans,$totalOwnersEquity],$studyDates);
 				$totalFixedAssets = HArr::sumAtDates([$landFixedAssets,$buildingFixedAssets,$totalFFEFixedAssets,$totalBeginningStartUpAndPreOperatingAssets],$studyDates);
-			
 				$totalAccumulatedDepreciation = HArr::sumAtDates([$buildingAccumulatedDepreciation,$totalFFEAccumulatedDepreciation,$totalAccumulatedDepreciationStartUpAndPreOperatingAssets],$studyDates);
 				$totalNetFixedAssets= HArr::sumAtDates([$landFixedAssets,$buildingEndBalance,$totalFFEEndBalance,$totalEndBalanceStartUpAndPreOperatingAssets],$studyDates);
 				$totalProjectsUnderProgress= HArr::sumAtDates([$projectUnderProgressConstructionEndBalance,$projectUnderProgressFFEEndBalance],$studyDates);
@@ -4305,15 +4329,12 @@ $dateIndexWithDate =App('dateIndexWithDate');
 		$monthlyPropertyTaxesAndExpensesAndPayments = $hospitalitySector->calculatePropertyTaxes($propertyAssetsForBuilding);
 
 		$propertyTaxes = $monthlyPropertyTaxesAndExpensesAndPayments['monthlyPropertyTaxesExpenses'] ?? []; 
-		
 		$monthlyPropertyInsuranceAndExpensesAndPayments =$hospitalitySector->calculatePropertyInsurance($studyDates,$propertyAssetsForBuilding , $propertyAssetsForFFE , $totalOfFFEItemForFFE );
 		$propertyInsurance = $monthlyPropertyInsuranceAndExpensesAndPayments['monthlyPropertyInsuranceExpenses'] ?? [];
 	
-
 		$totalPropertyTaxesAndInsurance=sumTwoArray($propertyTaxes,$propertyInsurance);
 		$totalOtherDeduction = sumTwoArray($baseManagementFees, $totalPropertyTaxesAndInsurance);
 		$ebitda = $calculateProfitsEquationsService->__calculateEBITDA($totalGrossProfit, $totalUndistributedOperationExpense, $totalOtherDeduction, $totalHotelRevenue);
-		// dd($propertyAssetsForBuilding);
 		return [
 			'totalOfFFEItemForFFE'=>$totalOfFFEItemForFFE,
 			'ebitda'=>$ebitda,
@@ -4349,6 +4370,7 @@ $dateIndexWithDate =App('dateIndexWithDate');
 			$onlyMonthlyDashboardItems = $this->onlyMonthlyDashboardItems( $dashboardItems,  $hospitalitySector, $operationStartDateAsIndex, $datesAsStringAndIndex, $datesIndexWithYearIndex, $yearIndexWithYear, $dateIndexWithDate, $dateWithDateIndex, $operationDates,$fixedAssetsLoan , $intervalName,$propertyAssetsForBuilding,$propertyAssetsForFFE);
 		}
 		$ebitda = $onlyMonthlyDashboardItems['ebitda'];
+
 		$propertyMonthlyDepreciation = $onlyMonthlyDashboardItems['propertyMonthlyDepreciation'];
 		$calculateProfitsEquationsService = $onlyMonthlyDashboardItems['calculateProfitsEquationsService'];
 		$totalLoanInterest = $onlyMonthlyDashboardItems['totalLoanInterest'];
@@ -4410,7 +4432,6 @@ $dateIndexWithDate =App('dateIndexWithDate');
 			],
 			'EBITDA' => [
 				'Earnings Before Interest Taxes Depreciation & Amortization [ EBITDA ]'=> $ebitda['values'] ?? [],
-				// 'EBITDA %'=> $ebitda['percentages'] ?? [],
 			],
 
 			'incentive_management_fees' => [

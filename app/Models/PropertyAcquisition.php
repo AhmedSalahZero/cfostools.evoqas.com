@@ -392,7 +392,6 @@ class PropertyAcquisition extends Model
 			else{
 				// $depreciationStartDateAsIndex = $dateAsIndex+1;
 			}
-			// dd($depreciationStartDateAsIndex,$operationStartDateAsIndex);
 			$depreciationEndDateAsIndex = !is_null($depreciationStartDateAsIndex) ? $depreciationStartDateAsIndex  + $propertyDepreciationDurationInMonths - 1  : null;
 			$buildingAssets['beginning_balance'][$dateAsIndex]= $beginningBalance;
 			$buildingAssets['additions'][$dateAsIndex] =  $dateAsIndex == $purchaseDateAsIndex ? $propertyAmount : ($dateAsIndex ==$constructionTransferredDateAsIndex ? $constructionTransferredValue : 0);

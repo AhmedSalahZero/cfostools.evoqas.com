@@ -1855,12 +1855,14 @@ trait HospitalitySectorAccessor
 		if ($meetingFacility == facility_count_daily_rent_occupancy_rate_method) {
 			$facilitySeasonality = $rentMeetingSeasonalityType == 'general-seasonality' ? $this->getRentGeneralSeasonality() : $meeting->getRentPerMeetingSeasonality();
 		}
+		// dd($meetingSeasonalityInterval,$facilitySeasonality,$facilitySeasonality);
 		$revenueItem = [
 			'seasonality' => $meetingSeasonalityInterval,
 			'quarters' => $facilitySeasonality,
 			'distribution_months_values' => $facilitySeasonality
 		];
 		$yearsOfOperationDuration = $this->convertIndexYearsAndMonthsToString($yearsOfOperationDuration,$yearIndexWithYear,$dateIndexWithDate);
+		// dd($revenueItem,$yearsOfOperationDuration);
 		$seasonality = $seasonalityService->salesSeasonality($revenueItem, $yearsOfOperationDuration,$dateWithMonthNumber);
 		return $this->convertStringDatesFromArrayKeysToIndexes($seasonality, $datesAsStringAndIndex);
 	}
@@ -2925,23 +2927,22 @@ trait HospitalitySectorAccessor
 		return  $this->getOnlyDatesOfActiveStudy($studyDurationPerYear,$dateIndexWithDate);
 	}
 
-	public function calculateWorkingCapitalInjection(array $accumulatedNetCash, array $datesAsStringAndIndex,array $datesIndexWithYearIndex,array $yearIndexWithYear,array $dateIndexWithDate)
+	public function calculateWorkingCapitalInjection(array $accumulatedNetCash, array $datesAsStringAndIndex,array $datesIndexWithYearIndex,array $yearIndexWithYear,array $dateIndexWithDate,$debug = false)
 	{
-		$minAtYear = [];
+
 		$workingCapital = [];
+	
 		$accumulatedNetCashPerYear = $this->arrayPerYear($accumulatedNetCash,$datesIndexWithYearIndex,$dateIndexWithDate);
 		$accumulatedNetCashPerYear = getMinAtEveryIndex($accumulatedNetCashPerYear);
-		$accumulatedNetCashPerYear = eachIndexMinusPreviousIfNegative($accumulatedNetCashPerYear);
-
-
+		
+		$accumulatedNetCashPerYear = eachIndexMinusPreviousIfNegative($accumulatedNetCashPerYear,$debug);
 		foreach ($accumulatedNetCashPerYear as $yearIndex=>$newValue) {
+			
 			$workingCapitalDate = $this->getFirstDateIndexInYearIndex($datesAsStringAndIndex, $yearIndex,$datesIndexWithYearIndex,$yearIndexWithYear,$dateIndexWithDate);
-
 			if (!is_null($workingCapitalDate)) {
 				$workingCapital[$workingCapitalDate] = $newValue;
 			}
 		}
-
 		return $workingCapital;
 	}
 
@@ -3036,7 +3037,8 @@ trait HospitalitySectorAccessor
 		$monthlyPropertyTaxesExpenses = [];
 		$propertyTaxesPayments = [];
 		// $lastStudyYear = explode('-', $this->getStudyEndDateAsIndex())[2];
-		$lastStudyYearAsIndex =$dateIndexWithYearIndex[ $this->getStudyEndDateAsIndex()];
+		$studyEndDateAsIndex = $this->getStudyEndDateAsIndex();
+		$lastStudyYearAsIndex =$dateIndexWithYearIndex[$studyEndDateAsIndex];
 		foreach ($propertyTaxesExpenses as $dateAsIndex =>$propertyTaxesExpenseValue) {
 			$paymentMonth = $propertyTaxesExpense->getPaymentMonth();
 			$paymentYearAsIndex =$dateIndexWithYearIndex[$dateAsIndex] + 1;
@@ -3047,7 +3049,9 @@ trait HospitalitySectorAccessor
 
 			for ($i = 0; $i<12; $i++) {
 				$currentDateAsIndex = $dateAsIndex + $i;
-				$monthlyPropertyTaxesExpenses[$currentDateAsIndex] =$propertyTaxesExpenseValue/12;
+				if($currentDateAsIndex <= $studyEndDateAsIndex){
+					$monthlyPropertyTaxesExpenses[$currentDateAsIndex] =$propertyTaxesExpenseValue/12;
+				}
 			}
 		}
 		return [
@@ -3102,7 +3106,8 @@ trait HospitalitySectorAccessor
 		}
 		$monthlyPropertyInsuranceExpenses = [];
 		$propertyInsurancePayments = [];
-		$lastStudyYearAsIndex = $dateIndexWithYearIndex[ $this->getStudyEndDateAsIndex()];
+		$studyEndDateAsIndex = $this->getStudyEndDateAsIndex() ;
+		$lastStudyYearAsIndex = $dateIndexWithYearIndex[$studyEndDateAsIndex];
 		foreach ($propertyInsuranceExpenses as $dateAsIndex =>$propertyInsuranceExpenseValue) {
 			// $paymentYear = explode('-', $dateAsString)[2];
 			// $paymentMonth = explode('-', $dateAsString)[1];
@@ -3116,9 +3121,12 @@ trait HospitalitySectorAccessor
 
 			for ($i = 0; $i<12; $i++) {
 				$currentDateAsIndex = $dateAsIndex+ $i ;
-				$monthlyPropertyInsuranceExpenses[$currentDateAsIndex] =$propertyInsuranceExpenseValue/12;
+				if($currentDateAsIndex <= $studyEndDateAsIndex ){
+					$monthlyPropertyInsuranceExpenses[$currentDateAsIndex] =$propertyInsuranceExpenseValue/12;
+				}
 			}
 		}
+	
 		return [
 			'propertyInsuranceExpenses'=>$propertyInsuranceExpenses,
 			'monthlyPropertyInsuranceExpenses'=>$monthlyPropertyInsuranceExpenses,
@@ -3131,10 +3139,20 @@ trait HospitalitySectorAccessor
 		// $reportItems must be after working capital calculations;
 		$totalCashInReportExceptEquityInjectionAndLoanWithdrawal  = $reportItems['cashInReport']['Total Cash In']['subItems'] ?? [];
 		unset($totalCashInReportExceptEquityInjectionAndLoanWithdrawal['Equity Injection'], $totalCashInReportExceptEquityInjectionAndLoanWithdrawal['Loan Withdrawal']);
-
+		
 		$totalCashInReportExceptEquityInjectionAndLoanWithdrawal = getTotalOfArraysOf2Depth($totalCashInReportExceptEquityInjectionAndLoanWithdrawal);
-		$totalCashOutReport = removeKeyFromArray($reportItems['cashOutReport']['Total Cash Out Report']??[], 'subItems');
+		$loanWithdrawals = $reportItems['cashInReport']['Total Cash In']['subItems']['Loan Withdrawal'] ;
+		if(isset($loanWithdrawals['subItems'])){
+			unset($loanWithdrawals['subItems']);
+		}
+		$acquisitionAndDevelopment = $reportItems['cashOutReport']['Total Cash Out Report']['subItems']['Acquisition And Development Payment'] ?? [];
+		unset($acquisitionAndDevelopment['subItems']);
+		
+		$reportItems['cashOutReport']['Total Cash Out Report']['subItems']['Acquisition And Development Payment'] = HArr::subtractAtDates([$acquisitionAndDevelopment,$loanWithdrawals],array_keys($acquisitionAndDevelopment));
+		$totalCashOutReport = getTotalOfArraysOf2Depth($reportItems['cashOutReport']['Total Cash Out Report']['subItems']??[]);
 
+	
+		// $totalCashOutReport = removeKeyFromArray($reportItems['cashOutReport']['Total Cash Out Report']??[], 'subItems');
 		return subtractTwoArray($totalCashInReportExceptEquityInjectionAndLoanWithdrawal, $totalCashOutReport);
 	}
 
@@ -3143,11 +3161,12 @@ trait HospitalitySectorAccessor
 		// $reportItems must be after working capital calculations;
 		$totalCashInReportExceptEquityInjectionAndLoanWithdrawal  = $reportItems['cashInReport']['Total Cash In']['subItems'] ?? [];
 		unset($totalCashInReportExceptEquityInjectionAndLoanWithdrawal['Equity Injection'], $totalCashInReportExceptEquityInjectionAndLoanWithdrawal['Loan Withdrawal']);
-
+		
 		$totalCashInReportExceptEquityInjectionAndLoanWithdrawal = getTotalOfArraysOf2Depth($totalCashInReportExceptEquityInjectionAndLoanWithdrawal);
 
 		$totalCashOutReportExceptEquityInjectionAndLoanWithdrawal  = $reportItems['cashOutReport']['Total Cash Out Report']['subItems'] ?? [];
 		unset($totalCashOutReportExceptEquityInjectionAndLoanWithdrawal['Loan Installments Payment']);
+	
 		$totalCashOutReportExceptEquityInjectionAndLoanWithdrawal = getTotalOfArraysOf2Depth($totalCashOutReportExceptEquityInjectionAndLoanWithdrawal);
 
 		return subtractTwoArray($totalCashInReportExceptEquityInjectionAndLoanWithdrawal, $totalCashOutReportExceptEquityInjectionAndLoanWithdrawal);

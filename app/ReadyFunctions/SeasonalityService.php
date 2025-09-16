@@ -2,7 +2,6 @@
 
 namespace App\ReadyFunctions;
 
-use stdClass;
 
 class SeasonalityService
 {

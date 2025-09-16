@@ -74,7 +74,7 @@
                                         <div class="card">
                                             <div class="card-header" id="headingOne44">
                                                 <div class="card-title" data-toggle="collapse" data-target="#collapsePlanningSectionId" aria-expanded="true" aria-controls="collapseOne44">
-                                                    <i class="flaticon2-layers-1"></i> {{ __('Feasibilities & Financial Planning Section') }}
+                                                    <i class="flaticon2-layers-1"></i> {{ __('Hospitality Feasibilities & Financial Planning Section') }}
                                                 </div>
                                             </div>
                                             <div id="collapsePlanningSectionId" class="collapse show" aria-labelledby="headingOne" data-parent="#planningSectionId">
@@ -87,6 +87,20 @@
                                                 </div>
                                             </div>
                                         </div>
+										
+										  <div class="card">
+                                            <div class="card-header" id="headingOne45">
+                                                <div class="card-title" data-toggle="collapse" data-target="#collapsePlanningSectionId2" aria-expanded="true" aria-controls="collapseOne44">
+                                                    <i class="flaticon2-layers-1"></i> {{ __('Manufacturing Feasibilities & Financial Planning Section') }}
+                                                </div>
+                                            </div>
+                                            <div id="collapsePlanningSectionId2" class="collapse" aria-labelledby="headingOne" data-parent="#planningSectionId">
+                                                <div class="card-body with-padding">
+                                                    <x-quick-nav :link="route('admin.view.hospitality.sector',$company->getIdentifier())">{{ __('Feasibility & Valuation') }}</x-quick-nav>
+                                                </div>
+                                            </div>
+                                        </div>
+										
 
 
 

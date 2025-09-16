@@ -2876,6 +2876,7 @@ function formatStackedChart(array $items,array $datesIndexWithYearIndex,array $y
 function sumTwoDimArr($items){
 	$sum = 0 ;
 	foreach($items as $item){
+	//	dump('key sum',array_sum($item));
 		foreach($item as $index =>$value){
 			$sum += $value ;
 		}
@@ -2891,7 +2892,7 @@ function getMinAtEveryIndex(array $keyAndValues)
 	}
 	return $result;
 }
-function eachIndexMinusPreviousIfNegative(array $items )
+function eachIndexMinusPreviousIfNegative(array $items,$debug = false  )
 {
 	$result = [];
 	foreach($items as $dateAsIndex=>$value)

@@ -83,7 +83,6 @@ class CalculateIrrService
 		$costOfFundRate = $costOfFundRate / 100 ; 
 		$index = 1 ;
 		foreach ($freeCashFlow  as $date => $value){
-			// $pow = (pow((1+$costOfFundRate) , $index)) ;
 			$netPresentValues[$date] = $value / (pow((1+$costOfFundRate) , $index));
 			$index++;
 		}

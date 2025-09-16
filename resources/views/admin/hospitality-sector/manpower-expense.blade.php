@@ -384,21 +384,6 @@
 
 		 @else
 
-		 {{-- <script>
-		     $(document).on('change', '.manpower-select', function() {
-		         let isChecked = $(this).is(':checked');
-		         if (!isChecked) {
-		             $('.btn-for-submit--js').removeClass('d-none')
-		         } else {
-
-		             $('.btn-for-submit--js').addClass('d-none')
-		         }
-		     })
-		     $(function() {
-		         $('.manpower-select').trigger('change');
-		     })
-
-		 </script> --}}
 		 @endif
 
 		 <script>

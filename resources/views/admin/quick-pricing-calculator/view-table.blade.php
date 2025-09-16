@@ -953,8 +953,6 @@ $tableId = 'kt_table_1';
 
 @section('js')
 <script src="{{ url('assets/vendors/custom/datatables/datatables.bundle.js') }}" type="text/javascript"></script>
-{{-- <script src="{{ url('assets/js/demo1/pages/crud/datatables/basic/paginations.js') }}" type="text/javascript"> --}}
-</script>
 
 <script>
     $(document).on('click', '#delete-btn', function() {

@@ -551,7 +551,6 @@ $totalOfDepreactionAndAmortization = 0;
                     <hr style="flex:1;background-color:lightgray">
                 </div>
                 <div class="row">
-
                     <div class="form-group row" style="flex:1;">
                         <div class="col-md-12 mt-3">
                             <div class="row">

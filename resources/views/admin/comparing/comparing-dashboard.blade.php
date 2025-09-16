@@ -269,7 +269,6 @@ a.back-to-study-btn:hover{
 <script src="https://cdn.amcharts.com/lib/5/themes/Animated.js"></script>
 
 
-{{-- <script src="{{url('assets/js/demo1/pages/crud/forms/validation/form-widgets.js')}}" type="text/javascript"></script> --}}
 
 <!--end::Page Scripts -->
 

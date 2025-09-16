@@ -519,6 +519,7 @@ class CalculateFixedLoanAtEndService
 
 			$executionAndPayment =$ffeExecutionAndPaymentService->__calculate($totalFFECost, $ffeStartDateAsIndex, $duration, $ffeExecutionMethod,$dateWithDateIndex, $hospitalitySector);
 			$contractPayments['FFE Payment'] = $contractPaymentService->__calculate($totalFFECost, 0, $executionAndPayment, $ffeStartDateAsIndex, $downPaymentRateOne, $ffeCollectionPolicyValue,$dateIndexWithDate, $dateWithDateIndex);
+			// dd('q',$executionAndPayment);
 			$ffeEquityPayment['FFE Equity Injection'] = $ffeExecutionAndPaymentService->calculateFFEEquityPayment($contractPayments['FFE Payment'], $totalFFECost, 0, $ffeEquityFundingRate);
 			$ffeLoanWithdrawal['FFE Loan Withdrawal'] = $ffeExecutionAndPaymentService->calculateFFELoanWithdrawal($contractPayments['FFE Payment'], $totalFFECost, 0, $ffeEquityFundingRate);
 
