@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --mp-page: 12 24 41;
+    --mp-card: 17 34 64;
+    --mp-card-hover: 22 45 84;
+    --mp-input: 12 24 41;
+    --mp-border: 20 144 168;
+    --mp-teal: 0 180 200;
+    --mp-teal-dark: 0 158 181;
+    --mp-teal-subtle: 0 180 200;
+    --mp-gold: 201 168 76;
+    --mp-gold-dark: 166 133 42;
+    --mp-text: 226 232 240;
+    --mp-text-secondary: 255 255 255;
+    --mp-muted: 255 255 255;
+    --mp-success: 16 185 129;
+    --mp-danger: 239 68 68;
+    --mp-warning: 245 158 11;
+}
