@@ -70,7 +70,6 @@ private function getDefinitions($orgId, $companyId = null)  // ← Added company
 //         'unit'        => $d->unit,
 //     ])->toArray();
 
-//     dd($debugData);   // This will show a nice dump
 // }
 // =============================================================================
         

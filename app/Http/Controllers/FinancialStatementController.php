@@ -1025,7 +1025,6 @@ class FinancialStatementController extends Controller
             array_map(fn($s) => array_merge($s, ['type' => 'cashflow']),     $this->cashflowSections()),
         );
 
-        // dd($this->incomeSections());
 
         foreach ($allTemplates as $template) {
             $key = $template['key'];
@@ -1186,12 +1185,10 @@ class FinancialStatementController extends Controller
     private function buildTotals($sections): array
     {
         $totals = [];
-    //   dd($sections);
         // 1. Load all non-computed totals first
         foreach ($sections as $sec) {
             if (!$sec->is_computed) {
                 $totals[$sec->section_key] = $sec->lineItems->sum('amount');
-        //    dd($sec->lineItems);
                 }
         }
 
@@ -1246,8 +1243,6 @@ class FinancialStatementController extends Controller
             ->orderBy('statement_type')   // ← added for consistency
             ->orderBy('sort_order')
             ->get();
-     //       dd($statement->id);
-       //: dd($sections);
         $t = $this->buildTotals($sections);
 
         $div = fn($n, $d) => ($d != 0) ? round($n / $d, 4) : null;
