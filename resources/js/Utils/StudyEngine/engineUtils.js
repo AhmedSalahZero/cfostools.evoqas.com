@@ -81,3 +81,35 @@ export function makePLExpenseKey(name) {
 
 export const CASH_POLICY       = { tranches: [{ pct: 100, days: 0  }] }
 export const THIRTY_DAY_POLICY = { tranches: [{ pct: 100, days: 30 }] }
+
+/**
+ * S-curve cumulative % complete (0..1) across `periods` — models
+ * construction execution as a Beta(alpha, beta) distribution: slow
+ * start, fast middle, slow finish. alpha=beta=2 (default) is the
+ * standard symmetric S-curve. Same formula as Magic ReveroPlanner's
+ * SCurveEngine::cumulativePercent(), kept identical across apps on
+ * purpose so an "execution %" schedule means the same thing wherever
+ * it's used.
+ */
+export function sCurveCumulativePercent(periods, alpha = 2.0, beta = 2.0) {
+  periods = Math.max(1, periods)
+  alpha   = Math.max(0.1, alpha)
+  beta    = Math.max(0.1, beta)
+
+  const raw = []
+  for (let i = 1; i <= periods; i++) {
+    const t = (i - 0.5) / periods
+    raw.push(Math.pow(t, alpha - 1) * Math.pow(1 - t, beta - 1))
+  }
+  const sum = raw.reduce((a, b) => a + b, 0)
+  const weights = sum > 0 ? raw.map(v => v / sum) : raw.map(() => 1 / periods)
+
+  const out = []
+  let running = 0
+  for (const w of weights) {
+    running += w
+    out.push(running)
+  }
+  if (out.length) out[out.length - 1] = 1 // force exact 100% on the last period
+  return out
+}

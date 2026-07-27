@@ -12,7 +12,7 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { toYM, monthDiff } from './engineUtils.js'
+import { toYM, monthDiff, sCurveCumulativePercent } from './engineUtils.js'
 
 export function calcFixedAssets(study, fixedAssetsData, productNames) {
   const totalMonths = study.duration_years * 12
@@ -64,12 +64,44 @@ export function calcFixedAssets(study, fixedAssetsData, productNames) {
       loanDrawdownByMonth[pupSt] += debtAmt
       assetLoanDraw[pupSt]       += debtAmt
     } else if (asset.payment_term === 'customize' && asset.custom_payment) {
-      for (const t of (asset.custom_payment.tranches ?? [])) {
+      // 'total'     → rate% of the fixed contract amount, regardless
+      //               of progress (e.g. a flat advance/retention %).
+      // 'execution' → rate% of the work CERTIFIED since the last
+      //               execution-basis tranche (a مستخلص إنجاز/progress
+      //               invoice) — tracked via an S-curve over the PUP
+      //               period, not a flat % of the whole contract.
+      //               This is the actual fix: previously both basis
+      //               values computed identically (total * rate),
+      //               silently ignoring which radio was selected.
+      const tranches = [...(asset.custom_payment.tranches ?? [])]
+        .map(t => ({ ...t, days: Number(t.days) || 0 }))
+        .sort((a, b) => a.days - b.days)
+
+      const execCumPct = sCurveCumulativePercent(
+        pupCnt,
+        asset.custom_payment.curve_alpha,
+        asset.custom_payment.curve_beta
+      )
+      let lastExecPct = 0
+
+      for (const t of tranches) {
         const rate = (Number(t.rate) || 0) / 100
-        const idx  = Math.min(totalMonths - 1, pupSt + Math.round((Number(t.days) || 0) / 30))
-        capexCashByMonth[idx]    += total * rate
-        loanDrawdownByMonth[idx] += total * rate * debtPct
-        assetLoanDraw[idx]       += total * rate * debtPct
+        const idx  = Math.min(totalMonths - 1, pupSt + Math.round(t.days / 30))
+
+        let amt
+        if (t.basis === 'execution') {
+          const periodIdx  = Math.min(pupCnt - 1, Math.max(0, Math.round(t.days / 30)))
+          const execPctNow = execCumPct[periodIdx] ?? 1
+          const certified  = Math.max(0, execPctNow - lastExecPct) * total
+          amt = certified * rate
+          lastExecPct = execPctNow
+        } else {
+          amt = total * rate
+        }
+
+        capexCashByMonth[idx]    += amt
+        loanDrawdownByMonth[idx] += amt * debtPct
+        assetLoanDraw[idx]       += amt * debtPct
       }
     } else if (asset.payment_term === 'installment' && asset.installment_config) {
       const cfg = asset.installment_config
