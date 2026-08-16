@@ -43,9 +43,13 @@ class SurveyController extends Controller
         if (!$request->boolean('blank') && !$request->filled('from_template')) {
             $this->rememberQuestionBankOrg($company);
 
-            return Inertia::render('Surveys/Start', [
-                'company'   => $this->surveyCompanyPayload($company),
-                'templates' => $this->organizationTemplates($company),
+            return Inertia::render('Surveys/Create', [
+                'company'      => $this->surveyCompanyPayload($company),
+                'templates'    => $this->organizationTemplates($company),
+                'start'        => true,
+                'bankSections' => [],
+                'bankItems'    => [],
+                'survey'       => null,
             ]);
         }
 

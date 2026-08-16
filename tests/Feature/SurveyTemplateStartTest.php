@@ -89,7 +89,8 @@ class SurveyTemplateStartTest extends TestCase
             ->get(route('surveys.create', $this->company->id))
             ->assertOk()
             ->assertInertia(fn ($page) => $page
-                ->component('Surveys/Start')
+                ->component('Surveys/Create')
+                ->where('start', true)
                 ->has('templates', 1)
                 ->where('templates.0.id', $orgTemplate)
                 ->where('templates.0.title', 'Org Template')
