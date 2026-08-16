@@ -70,7 +70,7 @@
                 <div v-if="!q.analytics || (Array.isArray(q.analytics) && q.analytics.length === 0)" class="text-white text-sm italic">No responses yet</div>
 
                 <!-- MCQ / Yes/No / Dropdown — bar chart -->
-                <div v-else-if="['mcq', 'yes_no', 'dropdown'].includes(q.question_type)" class="space-y-3">
+                <div v-else-if="['mcq', 'mcq_multi', 'yes_no', 'dropdown'].includes(q.question_type)" class="space-y-3">
                   <div v-for="opt in q.analytics" :key="opt.label">
                     <div class="flex items-center justify-between mb-1">
                       <span class="text-sm text-white">{{ opt.label }}</span>
@@ -236,9 +236,10 @@ const statusBadge = (s) => ({
   closed: 'bg-mp-danger/40 text-mp-danger border border-mp-danger/40',
 }[s] ?? 'bg-mp-page text-white')
 
-const typeLabel = (t) => ({ mcq: 'MCQ', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown' }[t] ?? t)
+const typeLabel = (t) => ({ mcq: 'MCQ', mcq_multi: 'MCQ Multi', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown' }[t] ?? t)
 const typeColor = (t) => ({
   mcq: 'bg-mp-teal-subtle/40 text-white',
+  mcq_multi: 'bg-mp-teal-subtle/40 text-white',
   yes_no: 'bg-mp-success/40 text-mp-success',
   rating: 'bg-mp-gold/40 text-white',
   short_text: 'bg-mp-gold/40 text-white',

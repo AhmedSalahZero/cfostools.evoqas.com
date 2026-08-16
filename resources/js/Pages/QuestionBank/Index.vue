@@ -12,10 +12,17 @@
                 <span class="w-9 h-9 bg-mp-teal/20 rounded-xl flex items-center justify-center text-lg">📚</span>
                 Question Bank
               </h1>
-              <p class="text-white text-sm mt-1">{{ localItems.length }} questions across {{ localSections.length }} sections</p>
+              <p class="text-white text-sm mt-1">
+                {{ localItems.length }} questions across {{ localSections.length }} sections
+                <span v-if="organizationName"> · {{ organizationName }}</span>
+              </p>
             </div>
             <div class="flex items-center gap-3">
-              <button @click="sectionModal.show = true"
+              <select v-if="organizations.length > 1" :value="organizationId" @change="switchOrganization"
+                class="bg-mp-card-hover border border-mp-border text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none">
+                <option v-for="org in organizations" :key="org.id" :value="org.id">{{ org.name }}</option>
+              </select>
+              <button @click="openNewSection"
                 class="flex items-center gap-2 bg-mp-card-hover hover:bg-mp-page text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors border border-mp-border">
                 + New Section
               </button>
@@ -51,7 +58,7 @@
                 <button @click="filterSection = s.id"
                   :class="filterSection === s.id ? 'bg-mp-teal text-white' : 'bg-mp-card border border-mp-border text-white hover:text-white hover:bg-mp-card-hover'"
                   class="w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium transition-colors pr-14">
-                  <span :class="`text-${s.color}-400`">●</span>
+                  <span class="inline-block w-2.5 h-2.5 rounded-full mr-1.5 align-middle" :style="{ backgroundColor: sectionColorHex(s.color) }"></span>
                   {{ s.name }}
                   <span class="float-right text-xs opacity-60">{{ localItems.filter(i => i.question_bank_section_id === s.id).length }}</span>
                 </button>
@@ -113,8 +120,9 @@
                     </td>
                     <td class="px-4 py-4">
                       <span v-if="item.section_name"
-                        :class="`bg-${item.section_color ?? 'blue'}-900/30 text-${item.section_color ?? 'blue'}-400 border border-${item.section_color ?? 'blue'}-700/40`"
-                        class="text-xs px-2 py-0.5 rounded-full">
+                        class="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-mp-border"
+                        :style="{ color: sectionColorHex(item.section_color), borderColor: sectionColorHex(item.section_color) }">
+                        <span class="w-2 h-2 rounded-full" :style="{ backgroundColor: sectionColorHex(item.section_color) }"></span>
                         {{ item.section_name }}
                       </span>
                       <span v-else class="text-white text-xs italic">Uncategorized</span>
@@ -156,12 +164,11 @@
           </div>
           <div class="mb-5">
             <label class="text-xs text-white mb-2 block">Color</label>
-            <div class="flex gap-2 flex-wrap">
-              <template v-for="color in colorOptions" :key="color">
-                <button @click="sectionModal.color = color"
-                  :class="[`bg-${color}-500`, sectionModal.color === color ? 'ring-2 ring-white ring-offset-2 ring-offset-gray-900' : '']"
-                  class="w-7 h-7 rounded-full transition-all"></button>
-              </template>
+            <div class="flex items-center gap-3">
+              <input type="color" v-model="sectionModal.color"
+                class="h-10 w-14 cursor-pointer rounded border border-mp-border bg-mp-card-hover p-1" />
+              <input v-model="sectionModal.color" type="text" maxlength="7" placeholder="#14b8a6"
+                class="flex-1 bg-mp-card-hover border border-mp-border text-white rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-mp-teal placeholder-gray-600 uppercase" />
             </div>
           </div>
           <div class="flex gap-3">
@@ -202,7 +209,7 @@
             </div>
 
             <!-- Options -->
-            <div v-if="['mcq', 'dropdown'].includes(itemModal.question_type)">
+            <div v-if="['mcq', 'mcq_multi', 'dropdown'].includes(itemModal.question_type)">
               <label class="text-xs text-white mb-2 block">Answer Options</label>
               <div v-for="(opt, oi) in itemModal.options" :key="oi" class="flex items-center gap-2 mb-2">
                 <input v-model="itemModal.options[oi]" type="text" :placeholder="`Option ${oi + 1}`"
@@ -237,13 +244,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
-import { Head } from '@inertiajs/vue3'
+import { ref, reactive, computed, watch } from 'vue'
+import { Head, Link, router } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 
 const props = defineProps({
   sections: Array,
   items:    Array,
+  organizationId: [Number, String],
+  organizationName: String,
+  organizations: { type: Array, default: () => [] },
 })
 
 const localSections = ref([...props.sections])
@@ -252,9 +262,27 @@ const search        = ref('')
 const typeFilter    = ref('')
 const filterSection = ref(null)
 
-const colorOptions = ['blue', 'purple', 'green', 'amber', 'red', 'cyan', 'rose', 'indigo', 'teal', 'orange']
+watch(() => props.sections, (value) => { localSections.value = [...(value ?? [])] })
+watch(() => props.items, (value) => { localItems.value = [...(value ?? [])] })
+
+const DEFAULT_SECTION_COLOR = '#14b8a6'
+const NAMED_SECTION_COLORS = {
+  blue: '#3b82f6', purple: '#a855f7', green: '#22c55e', amber: '#f59e0b',
+  red: '#ef4444', cyan: '#06b6d4', rose: '#f43f5e', indigo: '#6366f1',
+  teal: '#14b8a6', orange: '#f97316',
+}
+
+const sectionColorHex = (color) => {
+  if (!color) return DEFAULT_SECTION_COLOR
+  const value = String(color).trim()
+  if (/^#[0-9A-Fa-f]{6}$/.test(value)) return value
+  return NAMED_SECTION_COLORS[value] ?? DEFAULT_SECTION_COLOR
+}
+
+const sectionModal = reactive({ show: false, id: null, name: '', color: DEFAULT_SECTION_COLOR })
 const questionTypes = [
   { value: 'mcq',        label: 'Multiple Choice' },
+  { value: 'mcq_multi',  label: 'Multiple Choice multiple selection' },
   { value: 'yes_no',     label: 'Yes / No' },
   { value: 'rating',     label: 'Rating Scale' },
   { value: 'short_text', label: 'Short Text' },
@@ -262,7 +290,6 @@ const questionTypes = [
   { value: 'dropdown',   label: 'Dropdown' },
 ]
 
-const sectionModal = reactive({ show: false, id: null, name: '', color: 'blue' })
 const itemModal = reactive({
   show: false, id: null, question_text: '', question_type: 'mcq',
   section_id: null, is_required: false, rating_max: 5, placeholder: '', options: ['', '', ''],
@@ -270,32 +297,55 @@ const itemModal = reactive({
 
 const filteredItems = computed(() => {
   let items = localItems.value
-  if (filterSection !== null) {
-    if (filterSection.value === -1) items = items.filter(i => !i.question_bank_section_id)
-    else if (filterSection.value !== null) items = items.filter(i => i.question_bank_section_id === filterSection.value)
-  }
+  if (filterSection.value === -1) items = items.filter(i => !i.question_bank_section_id)
+  else if (filterSection.value !== null) items = items.filter(i => i.question_bank_section_id === filterSection.value)
   if (search.value) items = items.filter(i => i.question_text.toLowerCase().includes(search.value.toLowerCase()))
   if (typeFilter.value) items = items.filter(i => i.question_type === typeFilter.value)
   return items
 })
 
-const typeLabel = (t) => ({ mcq: 'MCQ', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown' }[t] ?? t)
+const typeLabel = (t) => ({ mcq: 'MCQ', mcq_multi: 'MCQ Multi', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown' }[t] ?? t)
 const typeColor = (t) => ({
-  mcq: 'bg-mp-teal-subtle/40 text-white', yes_no: 'bg-mp-success/40 text-mp-success',
+  mcq: 'bg-mp-teal-subtle/40 text-white', mcq_multi: 'bg-mp-teal-subtle/40 text-white', yes_no: 'bg-mp-success/40 text-mp-success',
   rating: 'bg-mp-gold/40 text-white', short_text: 'bg-mp-gold/40 text-white',
   number: 'bg-mp-teal-subtle/40 text-white', dropdown: 'bg-mp-danger/40 text-mp-danger',
 }[t] ?? 'bg-mp-card-hover text-white')
 
 const getCsrf = () => decodeURIComponent(document.cookie.split(';').find(c => c.trim().startsWith('XSRF-TOKEN='))?.split('=')[1] ?? '')
 
+const readJson = async (res) => {
+  try { return await res.json() } catch { return {} }
+}
+
+const assertOk = (res, data, fallback) => {
+  if (res.ok) return true
+  alert(data.message || fallback)
+  return false
+}
+
+const bankUrl = (path) => {
+  if (!props.organizationId) return path
+  return `${path}${path.includes('?') ? '&' : '?'}organization_id=${props.organizationId}`
+}
+
+const switchOrganization = (e) => {
+  router.get('/question-bank', { organization_id: e.target.value })
+}
+
 // Section CRUD
-const openEditSection = (s) => { Object.assign(sectionModal, { show: true, id: s.id, name: s.name, color: s.color }) }
+const openNewSection = () => {
+  Object.assign(sectionModal, { show: true, id: null, name: '', color: DEFAULT_SECTION_COLOR })
+}
+const openEditSection = (s) => {
+  Object.assign(sectionModal, { show: true, id: s.id, name: s.name, color: sectionColorHex(s.color) })
+}
 const saveSection = async () => {
   const body = { name: sectionModal.name, color: sectionModal.color }
-  const url = sectionModal.id ? `/question-bank/sections/${sectionModal.id}` : '/question-bank/sections'
+  const url = bankUrl(sectionModal.id ? `/question-bank/sections/${sectionModal.id}` : '/question-bank/sections')
   const method = sectionModal.id ? 'PUT' : 'POST'
   const res = await fetch(url, { method, headers: { 'X-XSRF-TOKEN': getCsrf(), 'Content-Type': 'application/json', 'Accept': 'application/json' }, credentials: 'include', body: JSON.stringify(body) })
-  const data = await res.json()
+  const data = await readJson(res)
+  if (!assertOk(res, data, 'Could not save section.')) return
   if (sectionModal.id) {
     const idx = localSections.value.findIndex(s => s.id === sectionModal.id)
     if (idx > -1) localSections.value[idx] = { ...localSections.value[idx], ...body }
@@ -306,7 +356,9 @@ const saveSection = async () => {
 }
 const deleteSection = async (s) => {
   if (!confirm(`Delete section "${s.name}"? Questions will become uncategorized.`)) return
-  await fetch(`/question-bank/sections/${s.id}`, { method: 'DELETE', headers: { 'X-XSRF-TOKEN': getCsrf(), 'Accept': 'application/json' }, credentials: 'include' })
+  const res = await fetch(bankUrl(`/question-bank/sections/${s.id}`), { method: 'DELETE', headers: { 'X-XSRF-TOKEN': getCsrf(), 'Accept': 'application/json' }, credentials: 'include' })
+  const data = await readJson(res)
+  if (!assertOk(res, data, 'Could not delete section.')) return
   localSections.value = localSections.value.filter(x => x.id !== s.id)
   localItems.value.forEach(i => { if (i.question_bank_section_id === s.id) i.question_bank_section_id = null })
 }
@@ -319,16 +371,17 @@ const openEditItem = (item) => {
   Object.assign(itemModal, { show: true, id: item.id, question_text: item.question_text, question_type: item.question_type, section_id: item.question_bank_section_id, is_required: item.is_required, rating_max: item.rating_max, placeholder: item.placeholder, options: item.options?.length ? [...item.options] : ['', '', ''] })
 }
 const onTypeChange = () => {
-  if (['mcq', 'dropdown'].includes(itemModal.question_type)) itemModal.options = ['', '', '']
+  if (['mcq', 'mcq_multi', 'dropdown'].includes(itemModal.question_type)) itemModal.options = ['', '', '']
   else if (itemModal.question_type === 'yes_no') itemModal.options = ['Yes', 'No']
   else itemModal.options = []
 }
 const saveItem = async () => {
   const body = { question_text: itemModal.question_text, question_type: itemModal.question_type, section_id: itemModal.section_id, is_required: itemModal.is_required, rating_max: itemModal.rating_max, placeholder: itemModal.placeholder, options: itemModal.options.filter(o => o.trim()) }
-  const url = itemModal.id ? `/question-bank/items/${itemModal.id}` : '/question-bank/items'
+  const url = bankUrl(itemModal.id ? `/question-bank/items/${itemModal.id}` : '/question-bank/items')
   const method = itemModal.id ? 'PUT' : 'POST'
   const res = await fetch(url, { method, headers: { 'X-XSRF-TOKEN': getCsrf(), 'Content-Type': 'application/json', 'Accept': 'application/json' }, credentials: 'include', body: JSON.stringify(body) })
-  const data = await res.json()
+  const data = await readJson(res)
+  if (!assertOk(res, data, 'Could not save question.')) return
   const sectionObj = localSections.value.find(s => s.id === body.section_id)
   if (itemModal.id) {
     const idx = localItems.value.findIndex(i => i.id === itemModal.id)
@@ -340,7 +393,9 @@ const saveItem = async () => {
 }
 const deleteItem = async (item) => {
   if (!confirm('Delete this question from the bank?')) return
-  await fetch(`/question-bank/items/${item.id}`, { method: 'DELETE', headers: { 'X-XSRF-TOKEN': getCsrf(), 'Accept': 'application/json' }, credentials: 'include' })
+  const res = await fetch(bankUrl(`/question-bank/items/${item.id}`), { method: 'DELETE', headers: { 'X-XSRF-TOKEN': getCsrf(), 'Accept': 'application/json' }, credentials: 'include' })
+  const data = await readJson(res)
+  if (!assertOk(res, data, 'Could not delete question.')) return
   localItems.value = localItems.value.filter(i => i.id !== item.id)
 }
 const handleMove = (item, e) => {
@@ -352,7 +407,9 @@ const handleMove = (item, e) => {
 
 const moveItem = async (item, sectionId) => {
   const sid = sectionId === 'null' ? null : parseInt(sectionId)
-  await fetch(`/question-bank/items/${item.id}/move`, { method: 'PUT', headers: { 'X-XSRF-TOKEN': getCsrf(), 'Content-Type': 'application/json', 'Accept': 'application/json' }, credentials: 'include', body: JSON.stringify({ section_id: sid }) })
+  const res = await fetch(bankUrl(`/question-bank/items/${item.id}/move`), { method: 'PUT', headers: { 'X-XSRF-TOKEN': getCsrf(), 'Content-Type': 'application/json', 'Accept': 'application/json' }, credentials: 'include', body: JSON.stringify({ section_id: sid }) })
+  const data = await readJson(res)
+  if (!assertOk(res, data, 'Could not move question.')) return
   const sectionObj = localSections.value.find(s => s.id === sid)
   const idx = localItems.value.findIndex(i => i.id === item.id)
   if (idx > -1) { localItems.value[idx].question_bank_section_id = sid; localItems.value[idx].section_name = sectionObj?.name; localItems.value[idx].section_color = sectionObj?.color }

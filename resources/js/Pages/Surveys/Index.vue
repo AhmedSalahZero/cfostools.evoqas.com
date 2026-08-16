@@ -20,7 +20,7 @@
               <p class="text-white text-sm mt-1">{{ localSurveys.length }} survey{{ localSurveys.length !== 1 ? 's' : '' }}</p>
             </div>
             <div class="flex items-center gap-3">
-              <Link href="/question-bank"
+              <Link :href="company.organization_id ? `/question-bank?organization_id=${company.organization_id}` : '/question-bank'"
                 class="flex items-center gap-2 bg-mp-card-hover hover:bg-mp-page text-white hover:text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors border border-mp-border">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
@@ -153,7 +153,7 @@
                   </Link>
 
                   <!-- Duplicate -->
-                  <button @click="copySurvey(survey)"
+                  <button @click="openCopy(survey)"
                     class="flex items-center gap-1.5 bg-mp-card-hover hover:bg-mp-page text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
                     📋 Copy
                   </button>
@@ -170,6 +170,30 @@
         </div>
       </div>
     </div>
+
+    <!-- COPY MODAL -->
+    <Teleport to="body">
+      <div v-if="copyModal.show" class="fixed inset-0 z-50 flex items-center justify-center p-4" @click.self="copyModal.show = false">
+        <div class="absolute inset-0 bg-black/70 backdrop-blur-sm"></div>
+        <div class="relative z-10 w-full max-w-sm bg-mp-card border border-mp-border rounded-2xl shadow-2xl p-6">
+          <h3 class="text-lg font-bold text-white text-center mb-2">Copy Survey</h3>
+          <p class="text-white text-sm text-center mb-4">Enter a name for the new survey</p>
+          <input v-model="copyModal.title" type="text" placeholder="Survey title"
+            @keyup.enter="executeCopy"
+            class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600 mb-5" />
+          <div class="flex gap-3">
+            <button @click="copyModal.show = false"
+              class="flex-1 px-4 py-2.5 rounded-lg bg-mp-card-hover hover:bg-mp-page text-white text-sm font-medium transition-colors">
+              Cancel
+            </button>
+            <button @click="executeCopy" :disabled="copyModal.saving || !copyModal.title.trim()"
+              class="flex-1 px-4 py-2.5 rounded-lg bg-mp-gold-dark hover:bg-mp-gold disabled:opacity-50 text-white text-sm font-semibold transition-colors">
+              {{ copyModal.saving ? 'Copying…' : 'Copy Survey' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- DELETE MODAL -->
     <Teleport to="body">
@@ -198,7 +222,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 
@@ -210,9 +234,14 @@ const props = defineProps({
 // Use a local reactive copy so we can mutate status/token without prop restrictions
 const localSurveys = ref(props.surveys.map(s => ({ ...s })))
 
+watch(() => props.surveys, (surveys) => {
+  localSurveys.value = (surveys ?? []).map(s => ({ ...s }))
+}, { deep: true })
+
 const copiedToken  = ref(null)
 const toastVisible = ref(false)
 const deleteModal  = reactive({ show: false, survey: null })
+const copyModal    = reactive({ show: false, survey: null, title: '', saving: false })
 
 const surveyUrl = (token) => `${window.location.origin}/s/${token}`
 
@@ -308,17 +337,31 @@ const toggleStatus = async (survey) => {
 }
 
 // ── Copy / Delete ─────────────────────────────────────────────────────────────
-const copySurvey = (survey) => {
-  router.post(`/portfolio-companies/${props.company.id}/surveys/${survey.id}/copy`)
+const openCopy = (survey) => {
+  copyModal.survey = survey
+  copyModal.title = `Copy of ${survey.title}`
+  copyModal.saving = false
+  copyModal.show = true
+}
+
+const executeCopy = () => {
+  const title = copyModal.title.trim()
+  if (!title || !copyModal.survey) return
+  copyModal.saving = true
+  router.post(`/portfolio-companies/${props.company.id}/surveys/${copyModal.survey.id}/copy`, { title }, {
+    onSuccess: () => { copyModal.show = false },
+    onFinish: () => { copyModal.saving = false },
+  })
 }
 
 const confirmDelete = (survey) => { deleteModal.survey = survey; deleteModal.show = true }
 const executeDelete = () => {
-  router.delete(`/portfolio-companies/${props.company.id}/surveys/${deleteModal.survey.id}`, {}, {
-    onSuccess: () => {
-      localSurveys.value = localSurveys.value.filter(s => s.id !== deleteModal.survey.id)
-    }
-  })
+  const id = deleteModal.survey?.id
   deleteModal.show = false
+  router.delete(`/portfolio-companies/${props.company.id}/surveys/${id}`, {
+    onSuccess: () => {
+      localSurveys.value = localSurveys.value.filter(s => s.id !== id)
+    },
+  })
 }
 </script>

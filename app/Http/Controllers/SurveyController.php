@@ -27,40 +27,42 @@ class SurveyController extends Controller
             ->orderByDesc('s.created_at')
             ->get();
 
+        $this->rememberQuestionBankOrg($company);
+
         return Inertia::render('Surveys/Index', [
-            'company' => ['id' => $company->id, 'name' => $company->name],
+            'company' => $this->surveyCompanyPayload($company),
             'surveys' => $surveys,
         ]);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // CREATE — Show builder page
+    // CREATE — Chooser, blank builder, or hydrate from org template
     // ─────────────────────────────────────────────────────────────────────────
-    public function create(PortfolioCompany $company)
+    public function create(Request $request, PortfolioCompany $company)
     {
-        $orgId = $company->organization_id;
+        if (!$request->boolean('blank') && !$request->filled('from_template')) {
+            $this->rememberQuestionBankOrg($company);
 
-        $bankSections = DB::table('question_bank_sections')
-            ->where('organization_id', $orgId)
-            ->orderBy('sort_order')->get();
+            return Inertia::render('Surveys/Start', [
+                'company'   => $this->surveyCompanyPayload($company),
+                'templates' => $this->organizationTemplates($company),
+            ]);
+        }
 
-        $bankItems = DB::table('question_bank_items as qi')
-            ->where('qi.organization_id', $orgId)
-            ->select('qi.*')
-            ->orderBy('qi.question_bank_section_id')->orderByDesc('qi.usage_count')
-            ->get()
-            ->map(function ($item) {
-                $item->options = DB::table('question_bank_item_options')
-                    ->where('question_bank_item_id', $item->id)
-                    ->orderBy('sort_order')->pluck('option_text');
-                return $item;
-            });
+        $survey = null;
+        if ($request->filled('from_template')) {
+            $survey = $this->hydrateFromTemplate($company, (int) $request->input('from_template'));
+        }
+
+        $this->rememberQuestionBankOrg($company);
+
+        [$bankSections, $bankItems] = $this->questionBankFor($company);
 
         return Inertia::render('Surveys/Create', [
-            'company'      => ['id' => $company->id, 'name' => $company->name],
+            'company'      => $this->surveyCompanyPayload($company),
             'bankSections' => $bankSections,
             'bankItems'    => $bankItems,
-            'survey'       => null,
+            'survey'       => $survey,
         ]);
     }
 
@@ -72,6 +74,7 @@ class SurveyController extends Controller
         $request->validate([
             'title'       => 'required|string|max:255',
             'questions'   => 'nullable|array',
+            ...$this->respondentFieldRules(),
         ]);
 
         $surveyId = DB::table('surveys')->insertGetId([
@@ -81,6 +84,7 @@ class SurveyController extends Controller
             'title'                => $request->title,
             'introduction'         => $request->introduction,
             'prepared_by'          => $request->prepared_by,
+            ...$this->respondentFieldValues($request),
             'status'               => 'draft',
             'is_template'          => $request->boolean('is_template'),
             'created_at'           => now(),
@@ -88,6 +92,7 @@ class SurveyController extends Controller
         ]);
 
         $this->syncQuestions($surveyId, $request->questions ?? []);
+        $this->copyFlaggedQuestionsToBank($company, $request->questions ?? []);
 
         return redirect()->route('surveys.index', $company->id)
             ->with('success', 'Survey created successfully.');
@@ -112,23 +117,14 @@ class SurveyController extends Controller
             });
 
         $survey->questions = $questions;
+        $this->castRespondentFlags($survey);
 
-        $orgId = $company->organization_id;
-        $bankSections = DB::table('question_bank_sections')
-            ->where('organization_id', $orgId)->orderBy('sort_order')->get();
+        $this->rememberQuestionBankOrg($company);
 
-        $bankItems = DB::table('question_bank_items as qi')
-            ->where('qi.organization_id', $orgId)->select('qi.*')
-            ->orderBy('qi.question_bank_section_id')->orderByDesc('qi.usage_count')
-            ->get()->map(function ($item) {
-                $item->options = DB::table('question_bank_item_options')
-                    ->where('question_bank_item_id', $item->id)
-                    ->orderBy('sort_order')->pluck('option_text');
-                return $item;
-            });
+        [$bankSections, $bankItems] = $this->questionBankFor($company);
 
         return Inertia::render('Surveys/Create', [
-            'company'      => ['id' => $company->id, 'name' => $company->name],
+            'company'      => $this->surveyCompanyPayload($company),
             'survey'       => $survey,
             'bankSections' => $bankSections,
             'bankItems'    => $bankItems,
@@ -140,17 +136,22 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function update(Request $request, PortfolioCompany $company, $surveyId)
     {
-        $request->validate(['title' => 'required|string|max:255']);
+        $request->validate([
+            'title' => 'required|string|max:255',
+            ...$this->respondentFieldRules(),
+        ]);
 
         DB::table('surveys')->where('id', $surveyId)->update([
             'title'        => $request->title,
             'introduction' => $request->introduction,
             'prepared_by'  => $request->prepared_by,
+            ...$this->respondentFieldValues($request),
             'is_template'  => $request->boolean('is_template'),
             'updated_at'   => now(),
         ]);
 
         $this->syncQuestions($surveyId, $request->questions ?? []);
+        $this->copyFlaggedQuestionsToBank($company, $request->questions ?? []);
 
         return redirect()->route('surveys.index', $company->id)
             ->with('success', 'Survey updated.');
@@ -197,18 +198,28 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     // COPY — Duplicate survey with new title + new link
     // ─────────────────────────────────────────────────────────────────────────
-    public function copy(PortfolioCompany $company, $surveyId)
+    public function copy(Request $request, PortfolioCompany $company, $surveyId)
     {
+        $request->validate([
+            'title' => 'required|string|max:255',
+        ]);
+
         $original = DB::table('surveys')->where('id', $surveyId)->firstOrFail();
 
         $newId = DB::table('surveys')->insertGetId([
             'portfolio_company_id' => $company->id,
             'organization_id'      => $company->organization_id,
             'created_by'           => auth()->id(),
-            'title'                => 'Copy of ' . $original->title,
+            'title'                => trim($request->title),
             'introduction'         => $original->introduction,
             'prepared_by'          => $original->prepared_by,
+            'default_respondent_name'    => $original->default_respondent_name ?? null,
+            'default_respondent_title'   => $original->default_respondent_title ?? null,
+            'default_respondent_company' => $original->default_respondent_company ?? null,
+            'show_respondent_age'        => (bool) ($original->show_respondent_age ?? false),
+            'show_respondent_gender'     => (bool) ($original->show_respondent_gender ?? false),
             'status'               => 'draft',
+            'is_template'          => false,
             'link_token'           => null,
             'response_count'       => 0,
             'created_at'           => now(),
@@ -316,6 +327,8 @@ class SurveyController extends Controller
                 return $q;
             });
 
+        $this->castRespondentFlags($survey);
+
         return Inertia::render('Surveys/Public', [
             'survey'    => $survey,
             'questions' => $questions,
@@ -332,11 +345,11 @@ class SurveyController extends Controller
 
         $responseId = DB::table('survey_responses')->insertGetId([
             'survey_id'          => $survey->id,
-            'respondent_name'    => $request->respondent_name,
-            'respondent_title'   => $request->respondent_title,
-            'respondent_company' => $request->respondent_company,
-            'respondent_gender'  => $request->respondent_gender,
-            'respondent_age'     => $request->respondent_age ?: null,
+            'respondent_name'    => $this->filledDefault($survey->default_respondent_name) ?? $request->respondent_name,
+            'respondent_title'   => $this->filledDefault($survey->default_respondent_title) ?? $request->respondent_title,
+            'respondent_company' => $this->filledDefault($survey->default_respondent_company),
+            'respondent_gender'  => !empty($survey->show_respondent_gender) ? $request->respondent_gender : null,
+            'respondent_age'     => !empty($survey->show_respondent_age) ? ($request->respondent_age ?: null) : null,
             'ip_address'         => $request->ip(),
             'created_at'         => now(),
             'updated_at'         => now(),
@@ -345,6 +358,11 @@ class SurveyController extends Controller
         foreach ($request->answers ?? [] as $qId => $answer) {
             $q = DB::table('survey_questions')->find($qId);
             if (!$q) continue;
+
+            if ($q->question_type === 'mcq_multi') {
+                $this->storeMultiSelectAnswers((int) $responseId, (int) $qId, $answer);
+                continue;
+            }
 
             if (in_array($q->question_type, ['mcq', 'dropdown'])) {
                 DB::table('survey_answers')->insert([
@@ -390,10 +408,16 @@ class SurveyController extends Controller
                     ->orderBy('sort_order')->get();
 
                 // Build analytics per question type
-                if (in_array($q->question_type, ['mcq', 'dropdown', 'yes_no'])) {
-                    $total = DB::table('survey_answers')
-                        ->where('survey_question_id', $q->id)
-                        ->whereNotNull('answer_option_id')->count();
+                if (in_array($q->question_type, ['mcq', 'mcq_multi', 'dropdown', 'yes_no'])) {
+                    $total = $q->question_type === 'mcq_multi'
+                        ? DB::table('survey_answers')
+                            ->where('survey_question_id', $q->id)
+                            ->whereNotNull('answer_option_id')
+                            ->distinct()
+                            ->count('survey_response_id')
+                        : DB::table('survey_answers')
+                            ->where('survey_question_id', $q->id)
+                            ->whereNotNull('answer_option_id')->count();
 
                     $q->analytics = DB::table('survey_answers as a')
                         ->join('survey_question_options as o', 'o.id', '=', 'a.answer_option_id')
@@ -475,6 +499,94 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     // PRIVATE HELPERS
     // ─────────────────────────────────────────────────────────────────────────
+    private function organizationTemplates(PortfolioCompany $company)
+    {
+        return DB::table('surveys as s')
+            ->where('s.organization_id', $company->organization_id)
+            ->where('s.is_template', true)
+            ->select(
+                's.id',
+                's.title',
+                's.prepared_by',
+                DB::raw('(SELECT COUNT(*) FROM survey_questions WHERE survey_id = s.id) as question_count')
+            )
+            ->orderBy('s.title')
+            ->get();
+    }
+
+    private function hydrateFromTemplate(PortfolioCompany $company, int $templateId): object
+    {
+        $survey = DB::table('surveys')
+            ->where('id', $templateId)
+            ->where('organization_id', $company->organization_id)
+            ->where('is_template', true)
+            ->first();
+
+        if (!$survey) {
+            abort(404);
+        }
+
+        $survey->questions = DB::table('survey_questions')
+            ->where('survey_id', $survey->id)
+            ->orderBy('sort_order')->get()
+            ->map(function ($q) {
+                $q->options = DB::table('survey_question_options')
+                    ->where('survey_question_id', $q->id)
+                    ->orderBy('sort_order')->pluck('option_text');
+                return $q;
+            });
+
+        $this->castRespondentFlags($survey);
+        $survey->is_template = false;
+        $survey->id = null;
+
+        return $survey;
+    }
+
+    private function surveyCompanyPayload(PortfolioCompany $company): array
+    {
+        return [
+            'id' => $company->id,
+            'name' => $company->name,
+            'organization_id' => $company->organization_id,
+        ];
+    }
+
+    private function rememberQuestionBankOrg(PortfolioCompany $company): void
+    {
+        session(['question_bank_organization_id' => (int) $company->organization_id]);
+    }
+
+    private function questionBankFor(PortfolioCompany $company): array
+    {
+        $orgIds = collect([
+            (int) $company->organization_id,
+            (int) auth()->user()?->organization_id,
+        ])->filter()->unique()->values()->all();
+
+        if ($orgIds === []) {
+            return [collect(), collect()];
+        }
+
+        $bankSections = DB::table('question_bank_sections')
+            ->whereIn('organization_id', $orgIds)
+            ->orderBy('sort_order')->get();
+
+        $bankItems = DB::table('question_bank_items as qi')
+            ->whereIn('qi.organization_id', $orgIds)
+            ->select('qi.*')
+            ->orderBy('qi.question_bank_section_id')->orderByDesc('qi.usage_count')
+            ->get()
+            ->map(function ($item) {
+                $item->options = DB::table('question_bank_item_options')
+                    ->where('question_bank_item_id', $item->id)
+                    ->orderBy('sort_order')->pluck('option_text');
+                return $item;
+            });
+
+        return [$bankSections, $bankItems];
+    }
+
     private function syncQuestions(int $surveyId, array $questions): void
     {
         DB::table('survey_questions')->where('survey_id', $surveyId)->delete();
@@ -505,6 +617,63 @@ class SurveyController extends Controller
         }
     }
 
+    private function copyFlaggedQuestionsToBank(PortfolioCompany $company, array $questions): void
+    {
+        $flagged = array_values(array_filter(
+            $questions,
+            fn ($q) => is_array($q) && filter_var($q['save_to_bank'] ?? false, FILTER_VALIDATE_BOOLEAN)
+        ));
+
+        if ($flagged === []) {
+            return;
+        }
+        $orgId = $company->organization_id;
+        $validSectionIds = DB::table('question_bank_sections')
+            ->where('organization_id', $orgId)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        foreach ($flagged as $q) {
+            $text = trim((string) ($q['question_text'] ?? ''));
+            if ($text === '') {
+                continue;
+            }
+
+            $sectionId = $q['bank_section_id'] ?? null;
+            $sectionId = $sectionId === '' || $sectionId === null ? null : (int) $sectionId;
+            if ($sectionId && ! in_array($sectionId, $validSectionIds, true)) {
+                $sectionId = null;
+            }
+
+            $itemId = DB::table('question_bank_items')->insertGetId([
+                'organization_id'          => $orgId,
+                'question_bank_section_id' => $sectionId,
+                'question_text'            => $text,
+                'question_type'            => $q['question_type'] ?? 'mcq',
+                'is_required'              => filter_var($q['is_required'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'rating_max'               => $q['rating_max'] ?? 5,
+                'placeholder'              => $q['placeholder'] ?? null,
+                'usage_count'              => 0,
+                'created_at'               => now(),
+                'updated_at'               => now(),
+            ]);
+
+            foreach ($q['options'] ?? [] as $j => $optText) {
+                if (! is_string($optText) || trim($optText) === '') {
+                    continue;
+                }
+                DB::table('question_bank_item_options')->insert([
+                    'question_bank_item_id' => $itemId,
+                    'option_text'           => $optText,
+                    'sort_order'            => $j,
+                    'created_at'            => now(),
+                    'updated_at'            => now(),
+                ]);
+            }
+        }
+    }
+
     private function buildAgeGroups($responses): array
     {
         $groups = ['Under 25' => 0, '25–34' => 0, '35–44' => 0, '45–54' => 0, '55+' => 0, 'Not provided' => 0];
@@ -518,5 +687,74 @@ class SurveyController extends Controller
             else $groups['55+']++;
         }
         return $groups;
+    }
+
+    private function storeMultiSelectAnswers(int $responseId, int $questionId, mixed $answer): void
+    {
+        $optionIds = collect(is_array($answer) ? $answer : [])
+            ->flatten()
+            ->filter(fn ($id) => $id !== null && $id !== '')
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($optionIds->isEmpty()) {
+            return;
+        }
+
+        $validIds = DB::table('survey_question_options')
+            ->where('survey_question_id', $questionId)
+            ->whereIn('id', $optionIds->all())
+            ->pluck('id');
+
+        foreach ($validIds as $optionId) {
+            DB::table('survey_answers')->insert([
+                'survey_response_id'  => $responseId,
+                'survey_question_id'  => $questionId,
+                'answer_text'         => null,
+                'answer_option_id'    => $optionId,
+                'created_at'          => now(),
+                'updated_at'          => now(),
+            ]);
+        }
+    }
+
+    private function respondentFieldRules(): array
+    {
+        return [
+            'default_respondent_name'    => 'nullable|string|max:255',
+            'default_respondent_title'   => 'nullable|string|max:255',
+            'default_respondent_company' => 'nullable|string|max:255',
+            'show_respondent_age'        => 'sometimes|boolean',
+            'show_respondent_gender'     => 'sometimes|boolean',
+        ];
+    }
+
+    private function respondentFieldValues(Request $request): array
+    {
+        return [
+            'default_respondent_name'    => $this->filledDefault($request->input('default_respondent_name')),
+            'default_respondent_title'   => $this->filledDefault($request->input('default_respondent_title')),
+            'default_respondent_company' => $this->filledDefault($request->input('default_respondent_company')),
+            'show_respondent_age'        => $request->boolean('show_respondent_age'),
+            'show_respondent_gender'     => $request->boolean('show_respondent_gender'),
+        ];
+    }
+
+    private function filledDefault(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $trimmed = trim((string) $value);
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function castRespondentFlags(object $survey): void
+    {
+        $survey->show_respondent_age = (bool) ($survey->show_respondent_age ?? false);
+        $survey->show_respondent_gender = (bool) ($survey->show_respondent_gender ?? false);
     }
 }

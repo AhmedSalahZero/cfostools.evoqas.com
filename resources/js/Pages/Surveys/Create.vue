@@ -1,5 +1,5 @@
 <template>
-  <Head :title="survey ? 'Edit Survey' : 'New Survey'" />
+  <Head :title="isEditing ? 'Edit Survey' : 'New Survey'" />
   <AuthenticatedLayout>
     <div class="min-h-screen bg-mp-page text-white">
 
@@ -13,7 +13,7 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
                 </svg>
               </Link>
-              <h1 class="text-lg font-bold text-white">{{ survey ? 'Edit Survey' : 'New Survey' }}</h1>
+              <h1 class="text-lg font-bold text-white">{{ isEditing ? 'Edit Survey' : 'New Survey' }}</h1>
             </div>
             <div class="flex items-center gap-3">
               <button @click="showBankPanel = !showBankPanel"
@@ -24,7 +24,7 @@
               <button @click="saveSurvey" :disabled="saving"
                 class="flex items-center gap-2 bg-mp-gold-dark hover:bg-mp-gold text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">
                 <span v-if="saving">Saving…</span>
-                <span v-else>{{ survey ? 'Update Survey' : 'Save Survey' }}</span>
+                <span v-else>{{ isEditing ? 'Update Survey' : 'Save Survey' }}</span>
               </button>
             </div>
           </div>
@@ -68,6 +68,56 @@
                   </label>
                 </div>
               </div>
+
+              <div class="pt-4 mt-2 border-t border-mp-border">
+                <p class="text-xs text-white uppercase tracking-widest font-semibold mb-1">About the respondent</p>
+                <p class="text-xs text-white/60 mb-4">Optional defaults appear read-only on the public form. Age and Gender stay hidden unless you choose Yes.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="text-xs text-white font-medium mb-1.5 block">Full Name</label>
+                    <input v-model="form.default_respondent_name" type="text" placeholder="Leave blank for the respondent to type"
+                      class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600" />
+                  </div>
+                  <div>
+                    <label class="text-xs text-white font-medium mb-1.5 block">Job Title</label>
+                    <input v-model="form.default_respondent_title" type="text" placeholder="Leave blank for the respondent to type"
+                      class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600" />
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="text-xs text-white font-medium mb-1.5 block">Company</label>
+                    <input v-model="form.default_respondent_company" type="text" placeholder="Leave blank to hide Company on the public form"
+                      class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600" />
+                  </div>
+                  <div>
+                    <p class="text-xs text-white font-medium mb-2">Show Age</p>
+                    <div class="flex gap-3">
+                      <label class="flex items-center gap-2 cursor-pointer text-sm text-white">
+                        <input type="radio" class="accent-mp-gold" :value="true" v-model="form.show_respondent_age" />
+                        Yes
+                      </label>
+                      <label class="flex items-center gap-2 cursor-pointer text-sm text-white">
+                        <input type="radio" class="accent-mp-gold" :value="false" v-model="form.show_respondent_age" />
+                        No
+                      </label>
+                    </div>
+                    <p class="text-xs text-white/50 mt-1.5">Optional when shown.</p>
+                  </div>
+                  <div>
+                    <p class="text-xs text-white font-medium mb-2">Show Gender</p>
+                    <div class="flex gap-3">
+                      <label class="flex items-center gap-2 cursor-pointer text-sm text-white">
+                        <input type="radio" class="accent-mp-gold" :value="true" v-model="form.show_respondent_gender" />
+                        Yes
+                      </label>
+                      <label class="flex items-center gap-2 cursor-pointer text-sm text-white">
+                        <input type="radio" class="accent-mp-gold" :value="false" v-model="form.show_respondent_gender" />
+                        No
+                      </label>
+                    </div>
+                    <p class="text-xs text-white/50 mt-1.5">Optional when shown.</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -109,10 +159,13 @@
                   <!-- Type-specific inputs -->
 
                   <!-- MCQ / Dropdown options -->
-                  <div v-if="['mcq', 'dropdown'].includes(q.question_type)">
+                  <div v-if="['mcq', 'mcq_multi', 'dropdown'].includes(q.question_type)">
                     <div v-for="(opt, oi) in q.options" :key="oi" class="flex items-center gap-2 mb-2">
-                      <div class="w-4 h-4 rounded-full border border-mp-border flex-shrink-0 flex items-center justify-center">
+                      <div
+                        :class="q.question_type === 'mcq_multi' ? 'rounded-sm' : 'rounded-full'"
+                        class="w-4 h-4 border border-mp-border flex-shrink-0 flex items-center justify-center">
                         <div v-if="q.question_type === 'mcq'" class="w-2 h-2 rounded-full bg-mp-muted"></div>
+                        <div v-else-if="q.question_type === 'mcq_multi'" class="w-2 h-2 rounded-sm bg-mp-muted"></div>
                         <div v-else class="w-2 h-0.5 bg-mp-muted"></div>
                       </div>
                       <input v-model="q.options[oi]" type="text" :placeholder="`Option ${oi + 1}`"
@@ -198,8 +251,8 @@
             <div class="p-3">
               <div v-for="section in groupedBankItems" :key="section.id ?? 'uncategorized'" class="mb-4">
                 <div v-if="section.name" class="flex items-center gap-2 mb-2">
-                  <span :class="`bg-${section.color}-900/40 text-${section.color}-400 border-${section.color}-700/50`"
-                    class="text-xs font-semibold px-2 py-0.5 rounded-full border">{{ section.name }}</span>
+                  <span class="text-xs font-semibold px-2 py-0.5 rounded-full border"
+                    :style="{ color: sectionColorHex(section.color), borderColor: sectionColorHex(section.color) }">{{ section.name }}</span>
                 </div>
                 <div v-for="item in section.items" :key="item.id"
                   @click="addFromBank(item)"
@@ -233,15 +286,31 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 const props = defineProps({
   company: Object,
   survey: Object,
-  bankSections: Array,
-  bankItems: Array,
+  bankSections: { type: Array, default: () => [] },
+  bankItems:    { type: Array, default: () => [] },
 })
+
+const isEditing = computed(() => !!props.survey?.id)
+
+const DEFAULT_SECTION_COLOR = '#14b8a6'
+const NAMED_SECTION_COLORS = {
+  blue: '#3b82f6', purple: '#a855f7', green: '#22c55e', amber: '#f59e0b',
+  red: '#ef4444', cyan: '#06b6d4', rose: '#f43f5e', indigo: '#6366f1',
+  teal: '#14b8a6', orange: '#f97316',
+}
+const sectionColorHex = (color) => {
+  if (!color) return DEFAULT_SECTION_COLOR
+  const value = String(color).trim()
+  if (/^#[0-9A-Fa-f]{6}$/.test(value)) return value
+  return NAMED_SECTION_COLORS[value] ?? DEFAULT_SECTION_COLOR
+}
 
 let _idCounter = 0
 const makeId = () => ++_idCounter
 
 const questionTypes = [
   { value: 'mcq',        label: 'Multiple Choice', icon: '◉', color: 'bg-mp-teal-subtle/40 text-white border-mp-teal/50 hover:bg-mp-teal-subtle/60' },
+  { value: 'mcq_multi',  label: 'Multiple Choice multiple selection', icon: '☑', color: 'bg-mp-teal-subtle/40 text-white border-mp-teal/50 hover:bg-mp-teal-subtle/60' },
   { value: 'yes_no',     label: 'Yes / No',        icon: '✓✕', color: 'bg-mp-success/40 text-mp-success border-mp-success/50 hover:bg-mp-success/60' },
   { value: 'rating',     label: 'Rating Scale',    icon: '★',  color: 'bg-mp-gold/40 text-white border-mp-gold/50 hover:bg-mp-gold/60' },
   { value: 'short_text', label: 'Short Text',      icon: '¶',  color: 'bg-mp-gold/40 text-white border-mp-gold/50 hover:bg-mp-gold/60' },
@@ -251,7 +320,7 @@ const questionTypes = [
 
 const defaultOptions = (type) => {
   if (type === 'yes_no') return ['Yes', 'No']
-  if (type === 'mcq' || type === 'dropdown') return ['', '', '']
+  if (type === 'mcq' || type === 'mcq_multi' || type === 'dropdown') return ['', '', '']
   return []
 }
 
@@ -281,7 +350,12 @@ const form = reactive({
   title:        props.survey?.title ?? '',
   introduction: props.survey?.introduction ?? '',
   prepared_by:  props.survey?.prepared_by ?? '',
-  is_template:  props.survey?.is_template ?? false,
+  default_respondent_name:    props.survey?.default_respondent_name ?? '',
+  default_respondent_title:   props.survey?.default_respondent_title ?? '',
+  default_respondent_company: props.survey?.default_respondent_company ?? '',
+  show_respondent_age:        !!props.survey?.show_respondent_age,
+  show_respondent_gender:     !!props.survey?.show_respondent_gender,
+  is_template:  props.survey?.id ? !!props.survey?.is_template : false,
   questions:    hydrateQuestions(),
 })
 
@@ -318,11 +392,11 @@ const addFromBank = (item) => {
 
 const groupedBankItems = computed(() => {
   const search = bankSearch.value.toLowerCase()
-  const filtered = props.bankItems.filter(i => !search || i.question_text.toLowerCase().includes(search))
+  const filtered = (props.bankItems ?? []).filter(i => !search || i.question_text.toLowerCase().includes(search))
 
   const map = new Map()
   map.set(null, { id: null, name: null, color: 'gray', items: [] })
-  props.bankSections.forEach(s => map.set(s.id, { ...s, items: [] }))
+  ;(props.bankSections ?? []).forEach(s => map.set(s.id, { ...s, items: [] }))
 
   filtered.forEach(item => {
     const sid = item.question_bank_section_id
@@ -332,9 +406,10 @@ const groupedBankItems = computed(() => {
   return [...map.values()].filter(s => s.items.length > 0)
 })
 
-const typeLabel = (t) => ({ mcq: 'MCQ', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown' }[t] ?? t)
+const typeLabel = (t) => ({ mcq: 'MCQ', mcq_multi: 'MCQ Multi', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown' }[t] ?? t)
 const typeColor = (t) => ({
   mcq: 'bg-mp-teal-subtle/40 text-white',
+  mcq_multi: 'bg-mp-teal-subtle/40 text-white',
   yes_no: 'bg-mp-success/40 text-mp-success',
   rating: 'bg-mp-gold/40 text-white',
   short_text: 'bg-mp-gold/40 text-white',
@@ -344,6 +419,7 @@ const typeColor = (t) => ({
 
 const typePlaceholder = (t) => ({
   mcq:        'Type your multiple choice question here...',
+  mcq_multi:  'Type your multiple-select question here...',
   yes_no:     'Type your yes/no question here...',
   rating:     'Type your rating question here...',
   short_text: 'Type your open-ended question here...',
@@ -359,6 +435,11 @@ const saveSurvey = async () => {
     title:        form.title,
     introduction: form.introduction,
     prepared_by:  form.prepared_by,
+    default_respondent_name:    form.default_respondent_name,
+    default_respondent_title:   form.default_respondent_title,
+    default_respondent_company: form.default_respondent_company,
+    show_respondent_age:        form.show_respondent_age,
+    show_respondent_gender:     form.show_respondent_gender,
     is_template:  form.is_template,
     questions: form.questions.map(q => ({
       question_text: q.question_text,
@@ -366,16 +447,13 @@ const saveSurvey = async () => {
       is_required:   q.is_required,
       rating_max:    q.rating_max,
       placeholder:   q.placeholder,
-      options:       ['mcq', 'dropdown', 'yes_no'].includes(q.question_type) ? q.options.filter(o => o.trim()) : [],
+      options:       ['mcq', 'mcq_multi', 'dropdown', 'yes_no'].includes(q.question_type) ? q.options.filter(o => o.trim()) : [],
+      save_to_bank:  !!q._saveToBank,
+      bank_section_id: q._bankSection || null,
     })),
   }
 
-  // Save questions to bank first (those with _saveToBank)
-  const bankQIndexes = form.questions
-    .map((q, i) => q._saveToBank ? i : null)
-    .filter(i => i !== null)
-
-  if (props.survey) {
+  if (isEditing.value) {
     router.put(`/portfolio-companies/${props.company.id}/surveys/${props.survey.id}`, payload, {
       onFinish: () => { saving.value = false }
     })

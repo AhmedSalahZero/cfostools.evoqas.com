@@ -29,24 +29,27 @@
           <div>
             <label class="text-xs text-white mb-1.5 block">Full Name</label>
             <input v-model="respondent.name" type="text" placeholder="Your name"
-              class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600" />
+              :readonly="nameLocked"
+              :class="inputClass(nameLocked)" />
           </div>
           <div>
             <label class="text-xs text-white mb-1.5 block">Job Title</label>
             <input v-model="respondent.title" type="text" placeholder="e.g. CFO"
-              class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600" />
+              :readonly="titleLocked"
+              :class="inputClass(titleLocked)" />
           </div>
-          <div>
+          <div v-if="companyLocked">
             <label class="text-xs text-white mb-1.5 block">Company</label>
             <input v-model="respondent.company" type="text" placeholder="Company name"
-              class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600" />
+              readonly
+              :class="inputClass(true)" />
           </div>
-          <div>
+          <div v-if="showAge">
             <label class="text-xs text-white mb-1.5 block">Age</label>
             <input v-model="respondent.age" type="number" placeholder="Your age" min="16" max="100"
               class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600" />
           </div>
-          <div class="col-span-2">
+          <div v-if="showGender" class="col-span-2">
             <label class="text-xs text-white mb-1.5 block">Gender</label>
             <div class="flex gap-3">
               <template v-for="g in genderOptions" :key="g.value">
@@ -86,6 +89,22 @@
                 <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0"
                   :class="answers[q.id] === opt.id ? 'border-mp-gold' : 'border-mp-border'">
                   <div v-if="answers[q.id] === opt.id" class="w-2 h-2 rounded-full bg-mp-gold"></div>
+                </div>
+                <span class="text-m">{{ opt.option_text }}</span>
+              </div>
+            </div>
+
+            <!-- MCQ multiple selection -->
+            <div v-else-if="q.question_type === 'mcq_multi'" class="space-y-2">
+              <div v-for="opt in q.options" :key="opt.id"
+                @click="toggleMulti(q.id, opt.id)"
+                :class="isMultiSelected(q.id, opt.id) ? 'bg-mp-gold/30 border-mp-gold/60 text-white' : 'bg-mp-card-hover/50 border-mp-teal text-white hover:border-mp-border'"
+                class="flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all">
+                <div class="w-4 h-4 rounded-sm border-2 flex items-center justify-center flex-shrink-0"
+                  :class="isMultiSelected(q.id, opt.id) ? 'border-mp-gold bg-mp-gold' : 'border-mp-border'">
+                  <svg v-if="isMultiSelected(q.id, opt.id)" class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                  </svg>
                 </div>
                 <span class="text-m">{{ opt.option_text }}</span>
               </div>
@@ -167,10 +186,30 @@ const props = defineProps({
   questions: Array,
 })
 
-const respondent = reactive({ name: '', title: '', company: '', age: '', gender: null })
+const nameLocked = !!props.survey.default_respondent_name
+const titleLocked = !!props.survey.default_respondent_title
+const companyLocked = !!props.survey.default_respondent_company
+const showAge = !!props.survey.show_respondent_age
+const showGender = !!props.survey.show_respondent_gender
+
+const respondent = reactive({
+  name: props.survey.default_respondent_name ?? '',
+  title: props.survey.default_respondent_title ?? '',
+  company: props.survey.default_respondent_company ?? '',
+  age: '',
+  gender: null,
+})
 const answers = reactive({})
 const errors = reactive({})
 const submitting = ref(false)
+
+const inputClass = (readonly) =>
+  [
+    'w-full border rounded-lg px-4 py-2.5 text-sm placeholder-gray-600',
+    readonly
+      ? 'bg-mp-page border-mp-border text-white/70 cursor-not-allowed'
+      : 'bg-mp-card-hover border-mp-border text-white focus:outline-none focus:border-mp-gold',
+  ].join(' ')
 
 const genderOptions = [
   { value: 'male', label: 'Male' },
@@ -178,12 +217,28 @@ const genderOptions = [
   { value: 'prefer_not_to_say', label: 'Prefer not to say' },
 ]
 
+const isMultiSelected = (qId, optId) => Array.isArray(answers[qId]) && answers[qId].some(id => String(id) === String(optId))
+
+const toggleMulti = (qId, optId) => {
+  const current = Array.isArray(answers[qId]) ? [...answers[qId]] : []
+  const idx = current.findIndex(id => String(id) === String(optId))
+  if (idx >= 0) current.splice(idx, 1)
+  else current.push(optId)
+  answers[qId] = current
+}
+
+const isAnswered = (q) => {
+  const value = answers[q.id]
+  if (q.question_type === 'mcq_multi') return Array.isArray(value) && value.length > 0
+  return !!value
+}
+
 const submitSurvey = async () => {
   // Validate required
   let valid = true
   props.questions.forEach(q => {
     errors[q.id] = false
-    if (q.is_required && !answers[q.id]) {
+    if (q.is_required && !isAnswered(q)) {
       errors[q.id] = true
       valid = false
     }

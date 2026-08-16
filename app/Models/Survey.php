@@ -13,6 +13,11 @@ class Survey extends Model
         'title',
         'introduction',
         'prepared_by',
+        'default_respondent_name',
+        'default_respondent_title',
+        'default_respondent_company',
+        'show_respondent_age',
+        'show_respondent_gender',
         'link_token',
         'status',
         'is_template',
@@ -21,6 +26,8 @@ class Survey extends Model
 
     protected $casts = [
         'is_template' => 'boolean',
+        'show_respondent_age' => 'boolean',
+        'show_respondent_gender' => 'boolean',
     ];
 
     public function company()
