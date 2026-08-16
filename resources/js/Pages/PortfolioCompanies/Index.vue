@@ -4,6 +4,12 @@
 	<AuthenticatedLayout>
 		<div class="min-h-screen bg-mp-page text-white">
 			<!-- PAGE HEADER -->
+			 
+			
+			
+			
+			
+			
 			<div class="bg-mp-card border-b border-mp-border">
 				<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 					<div class="flex items-center justify-between">
