@@ -294,6 +294,7 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/',                        [App\Http\Controllers\DocumentController::class, 'index'])->name('index');
         Route::post('/',                       [App\Http\Controllers\DocumentController::class, 'store'])->name('store');
         Route::get('/{document}/download',     [App\Http\Controllers\DocumentController::class, 'download'])->name('download');
+        Route::get('/{document}/view',         [App\Http\Controllers\DocumentController::class, 'view'])->name('view');
         Route::patch('/{document}/rename',     [App\Http\Controllers\DocumentController::class, 'rename'])->name('rename');
         Route::delete('/{document}',           [App\Http\Controllers\DocumentController::class, 'destroy'])->name('destroy');
     });

@@ -242,6 +242,17 @@
 
                   <!-- Action buttons -->
                   <div class="flex items-center gap-1.5 pt-2 border-t border-mp-border">
+                    <!-- View -->
+                    <button type="button" @click="openViewModal(doc)"
+                      class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-mp-card-hover hover:bg-mp-teal/20 text-white hover:text-white text-xs font-semibold transition-colors">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                      </svg>
+                      View
+                    </button>
                     <!-- Download -->
                     <a :href="`/portfolio-companies/${company.id}/data-room/${doc.id}/download`"
                       class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-mp-teal/10 hover:bg-mp-teal text-white hover:text-white text-xs font-semibold transition-colors">
@@ -457,6 +468,82 @@
       </div>
     </Teleport>
 
+    <!-- ══════════════════════════════════════════ VIEW MODAL ════════════════ -->
+    <Teleport to="body">
+      <div v-if="viewModal.show"
+        class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col p-4">
+        <div class="bg-mp-card rounded-2xl border border-mp-border shadow-2xl w-full max-w-6xl mx-auto flex flex-col overflow-hidden"
+          style="height: min(92vh, 920px);">
+
+          <div class="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-mp-border flex-shrink-0">
+            <div class="min-w-0">
+              <p class="text-white font-bold text-sm truncate" :title="viewModal.doc?.name">
+                {{ viewModal.doc?.name }}
+              </p>
+              <p class="text-white/70 text-xs mt-0.5">{{ fileTypeLabel(viewModal.doc?.mime_type) }}</p>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <a v-if="viewModal.doc"
+                :href="`/portfolio-companies/${company.id}/data-room/${viewModal.doc.id}/download`"
+                class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mp-teal/10 hover:bg-mp-teal text-white text-xs font-semibold transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Download
+              </a>
+              <button type="button" @click="closeViewModal"
+                class="w-8 h-8 flex items-center justify-center rounded-lg bg-mp-card-hover hover:bg-mp-page text-white transition-colors"
+                title="Close">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex-1 min-h-0 bg-mp-page">
+            <iframe v-if="viewKind === 'pdf'"
+              :src="viewUrl"
+              class="w-full h-full border-0 bg-white"
+              title="Document preview"/>
+
+            <div v-else-if="viewKind === 'image'" class="w-full h-full flex items-center justify-center p-4 overflow-auto">
+              <img :src="viewUrl" :alt="viewModal.doc?.name" class="max-w-full max-h-full object-contain rounded-lg"/>
+            </div>
+
+            <div v-else-if="viewKind === 'csv'" class="w-full h-full overflow-auto p-4">
+              <p v-if="viewModal.csvLoading" class="text-white text-sm">Loading preview…</p>
+              <p v-else-if="viewModal.csvError" class="text-mp-danger text-sm">{{ viewModal.csvError }}</p>
+              <pre v-else class="text-white text-xs font-mono whitespace-pre-wrap break-words">{{ viewModal.csvContent }}</pre>
+            </div>
+
+            <div v-else class="w-full h-full flex items-center justify-center p-8">
+              <div class="max-w-md text-center">
+                <div class="w-14 h-14 bg-mp-card-hover rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">
+                  {{ fileIconEmoji(viewModal.doc?.mime_type) }}
+                </div>
+                <h3 class="text-white font-bold text-base mb-2">Preview not available</h3>
+                <p class="text-white/80 text-sm mb-5">
+                  {{ fileTypeLabel(viewModal.doc?.mime_type) }} files cannot be previewed in the browser.
+                  Download the file to open it on your computer.
+                </p>
+                <a v-if="viewModal.doc"
+                  :href="`/portfolio-companies/${company.id}/data-room/${viewModal.doc.id}/download`"
+                  class="inline-flex items-center gap-2 bg-mp-teal hover:bg-mp-teal-dark text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                  </svg>
+                  Download
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- ══════════════════════════════════════════ DELETE MODAL ══════════════ -->
     <Teleport to="body">
       <div v-if="deleteModal.show"
@@ -659,6 +746,65 @@ function submitRename() {
       onFinish:  () => { renameModal.loading = false },
     }
   )
+}
+
+// ── View Modal ─────────────────────────────────────────────────────────────────
+const viewModal = reactive({
+  show:       false,
+  doc:        null,
+  csvContent: '',
+  csvLoading: false,
+  csvError:   '',
+})
+
+const viewKind = computed(() => {
+  const mime = viewModal.doc?.mime_type || ''
+  if (mime.includes('pdf')) return 'pdf'
+  if (mime.startsWith('image/')) return 'image'
+  if (mime === 'text/csv' || mime === 'text/plain' || mime.includes('csv')) return 'csv'
+  return 'unsupported'
+})
+
+const viewUrl = computed(() => {
+  if (!viewModal.doc) return ''
+  return `/portfolio-companies/${props.company.id}/data-room/${viewModal.doc.id}/view`
+})
+
+function openViewModal(doc) {
+  viewModal.doc        = doc
+  viewModal.csvContent = ''
+  viewModal.csvLoading = false
+  viewModal.csvError   = ''
+  viewModal.show       = true
+
+  if ((doc.mime_type === 'text/csv' || doc.mime_type === 'text/plain' || (doc.mime_type || '').includes('csv'))) {
+    loadCsvPreview(doc)
+  }
+}
+
+function closeViewModal() {
+  viewModal.show       = false
+  viewModal.doc        = null
+  viewModal.csvContent = ''
+  viewModal.csvError   = ''
+}
+
+async function loadCsvPreview(doc) {
+  viewModal.csvLoading = true
+  viewModal.csvError   = ''
+  try {
+    const response = await fetch(`/portfolio-companies/${props.company.id}/data-room/${doc.id}/view`, {
+      credentials: 'same-origin',
+    })
+    if (!response.ok) {
+      throw new Error('Could not load file preview.')
+    }
+    viewModal.csvContent = await response.text()
+  } catch (error) {
+    viewModal.csvError = error?.message || 'Could not load file preview.'
+  } finally {
+    viewModal.csvLoading = false
+  }
 }
 
 // ── Delete Modal ───────────────────────────────────────────────────────────────
