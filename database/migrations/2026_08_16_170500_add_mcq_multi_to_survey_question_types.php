@@ -16,6 +16,10 @@ return new class extends Migration
         $this->alterQuestionTypeEnum(['mcq', 'yes_no', 'rating', 'short_text', 'number', 'dropdown']);
     }
 
+	
+	
+	
+	
     /**
      * @param  list<string>  $values
      */
