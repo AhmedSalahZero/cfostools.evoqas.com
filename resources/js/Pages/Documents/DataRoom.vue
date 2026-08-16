@@ -513,9 +513,77 @@
             </div>
 
             <div v-else-if="viewKind === 'csv'" class="w-full h-full overflow-auto p-4">
-              <p v-if="viewModal.csvLoading" class="text-white text-sm">Loading preview…</p>
-              <p v-else-if="viewModal.csvError" class="text-mp-danger text-sm">{{ viewModal.csvError }}</p>
+              <p v-if="viewModal.officeLoading" class="text-white text-sm">Loading preview…</p>
+              <p v-else-if="viewModal.officeError" class="text-mp-danger text-sm">{{ viewModal.officeError }}</p>
               <pre v-else class="text-white text-xs font-mono whitespace-pre-wrap break-words">{{ viewModal.csvContent }}</pre>
+            </div>
+
+            <div v-else-if="viewKind === 'excel'" class="w-full h-full flex flex-col min-h-0">
+              <div v-if="viewModal.officeLoading" class="flex-1 flex items-center justify-center text-white text-sm">
+                Loading spreadsheet…
+              </div>
+              <div v-else-if="viewModal.officeError" class="flex-1 flex items-center justify-center p-8">
+                <p class="text-mp-danger text-sm text-center">{{ viewModal.officeError }}</p>
+              </div>
+              <template v-else>
+                <div class="flex-shrink-0 flex items-center gap-1 px-3 py-2 border-b border-mp-border overflow-x-auto">
+                  <button
+                    v-for="(sheet, idx) in viewModal.excelSheets"
+                    :key="sheet.name"
+                    type="button"
+                    @click="viewModal.excelActiveSheet = idx"
+                    :class="[
+                      'px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition-colors',
+                      viewModal.excelActiveSheet === idx
+                        ? 'bg-mp-teal text-white'
+                        : 'bg-mp-card-hover text-white hover:bg-mp-teal/20'
+                    ]">
+                    {{ sheet.name }}
+                  </button>
+                </div>
+                <p v-if="activeExcelSheet?.truncated" class="flex-shrink-0 px-4 py-1.5 text-xs text-white/70 border-b border-mp-border">
+                  Showing the first {{ EXCEL_PREVIEW_ROWS }} rows.
+                </p>
+                <div class="flex-1 min-h-0 overflow-auto bg-white">
+                  <table v-if="activeExcelSheet" class="excel-preview-table">
+                    <tbody>
+                      <tr v-for="(row, rIdx) in activeExcelSheet.rows" :key="rIdx">
+                        <td v-for="(cell, cIdx) in paddedExcelRow(row)" :key="cIdx">{{ cell }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+            </div>
+
+            <div v-else-if="viewKind === 'word'" class="w-full h-full relative min-h-0">
+              <div v-if="viewModal.officeLoading"
+                class="absolute inset-0 z-10 flex items-center justify-center bg-mp-page text-white text-sm">
+                Loading document…
+              </div>
+              <p v-else-if="viewModal.officeError" class="p-8 text-mp-danger text-sm text-center">
+                {{ viewModal.officeError }}
+              </p>
+              <div
+                v-show="!viewModal.officeError"
+                ref="wordPreviewEl"
+                class="w-full h-full overflow-auto bg-neutral-200 p-4"
+              ></div>
+            </div>
+
+            <div v-else-if="viewKind === 'powerpoint'" class="w-full h-full relative min-h-0">
+              <div v-if="viewModal.officeLoading"
+                class="absolute inset-0 z-10 flex items-center justify-center bg-mp-page text-white text-sm">
+                Loading presentation…
+              </div>
+              <p v-else-if="viewModal.officeError" class="p-8 text-mp-danger text-sm text-center">
+                {{ viewModal.officeError }}
+              </p>
+              <div
+                v-show="!viewModal.officeError"
+                ref="pptxPreviewEl"
+                class="w-full h-full overflow-auto bg-neutral-200 p-4"
+              ></div>
             </div>
 
             <div v-else class="w-full h-full flex items-center justify-center p-8">
@@ -588,7 +656,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, nextTick } from 'vue'
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 
@@ -749,61 +817,201 @@ function submitRename() {
 }
 
 // ── View Modal ─────────────────────────────────────────────────────────────────
+const EXCEL_PREVIEW_ROWS = 500
+const wordPreviewEl = ref(null)
+const pptxPreviewEl = ref(null)
+let previewSeq = 0
+let pptxViewer = null
+
 const viewModal = reactive({
-  show:       false,
-  doc:        null,
-  csvContent: '',
-  csvLoading: false,
-  csvError:   '',
+  show:             false,
+  doc:              null,
+  csvContent:       '',
+  officeLoading:    false,
+  officeError:      '',
+  excelSheets:      [],
+  excelActiveSheet: 0,
 })
 
-const viewKind = computed(() => {
-  const mime = viewModal.doc?.mime_type || ''
-  if (mime.includes('pdf')) return 'pdf'
-  if (mime.startsWith('image/')) return 'image'
-  if (mime === 'text/csv' || mime === 'text/plain' || mime.includes('csv')) return 'csv'
-  return 'unsupported'
-})
+const viewKind = computed(() => previewKind(viewModal.doc?.mime_type))
 
 const viewUrl = computed(() => {
   if (!viewModal.doc) return ''
   return `/portfolio-companies/${props.company.id}/data-room/${viewModal.doc.id}/view`
 })
 
-function openViewModal(doc) {
-  viewModal.doc        = doc
-  viewModal.csvContent = ''
-  viewModal.csvLoading = false
-  viewModal.csvError   = ''
-  viewModal.show       = true
+const activeExcelSheet = computed(() => {
+  return viewModal.excelSheets[viewModal.excelActiveSheet] ?? null
+})
 
-  if ((doc.mime_type === 'text/csv' || doc.mime_type === 'text/plain' || (doc.mime_type || '').includes('csv'))) {
-    loadCsvPreview(doc)
+function previewKind(mime) {
+  if (!mime) return 'unsupported'
+  if (mime.includes('pdf')) return 'pdf'
+  if (mime.startsWith('image/')) return 'image'
+  if (mime === 'text/csv' || mime === 'text/plain' || mime.includes('csv')) return 'csv'
+  if (mime.includes('wordprocessingml')) return 'word'
+  if (mime.includes('sheet') || mime.includes('excel')) return 'excel'
+  if (mime.includes('presentationml')) return 'powerpoint'
+  return 'unsupported'
+}
+
+function paddedExcelRow(row) {
+  const width = activeExcelSheet.value?.colCount ?? (row?.length ?? 1)
+  const cells = Array.isArray(row) ? [...row] : []
+  while (cells.length < width) cells.push('')
+  return cells
+}
+
+function resetViewPreview() {
+  previewSeq += 1
+  viewModal.csvContent = ''
+  viewModal.officeLoading = false
+  viewModal.officeError = ''
+  viewModal.excelSheets = []
+  viewModal.excelActiveSheet = 0
+  if (pptxViewer?.destroy) {
+    pptxViewer.destroy()
   }
+  pptxViewer = null
+  if (wordPreviewEl.value) wordPreviewEl.value.innerHTML = ''
+  if (pptxPreviewEl.value) pptxPreviewEl.value.innerHTML = ''
+}
+
+function openViewModal(doc) {
+  viewModal.doc = doc
+  resetViewPreview()
+  viewModal.show = true
+
+  const kind = previewKind(doc.mime_type)
+  if (kind === 'csv') loadCsvPreview(doc)
+  else if (kind === 'excel') loadExcelPreview(doc)
+  else if (kind === 'word') loadWordPreview(doc)
+  else if (kind === 'powerpoint') loadPowerpointPreview(doc)
 }
 
 function closeViewModal() {
-  viewModal.show       = false
-  viewModal.doc        = null
-  viewModal.csvContent = ''
-  viewModal.csvError   = ''
+  resetViewPreview()
+  viewModal.show = false
+  viewModal.doc = null
+}
+
+async function fetchPreviewBuffer(doc) {
+  const response = await fetch(`/portfolio-companies/${props.company.id}/data-room/${doc.id}/view`, {
+    credentials: 'same-origin',
+  })
+  if (!response.ok) {
+    throw new Error('Could not load file preview.')
+  }
+  return response.arrayBuffer()
 }
 
 async function loadCsvPreview(doc) {
-  viewModal.csvLoading = true
-  viewModal.csvError   = ''
+  const seq = previewSeq
+  viewModal.officeLoading = true
+  viewModal.officeError = ''
   try {
-    const response = await fetch(`/portfolio-companies/${props.company.id}/data-room/${doc.id}/view`, {
-      credentials: 'same-origin',
+    const buffer = await fetchPreviewBuffer(doc)
+    if (seq !== previewSeq) return
+    viewModal.csvContent = new TextDecoder().decode(buffer)
+  } catch (error) {
+    if (seq !== previewSeq) return
+    viewModal.officeError = error?.message || 'Could not load file preview.'
+  } finally {
+    if (seq === previewSeq) viewModal.officeLoading = false
+  }
+}
+
+async function loadExcelPreview(doc) {
+  const seq = previewSeq
+  viewModal.officeLoading = true
+  viewModal.officeError = ''
+  try {
+    const [buffer, xlsxModule] = await Promise.all([
+      fetchPreviewBuffer(doc),
+      import('xlsx'),
+    ])
+    if (seq !== previewSeq) return
+
+    const XLSX = xlsxModule.default ?? xlsxModule
+    const workbook = XLSX.read(buffer, { type: 'array' })
+    const names = workbook.SheetNames?.length ? workbook.SheetNames : ['Sheet1']
+
+    viewModal.excelSheets = names.map((name) => {
+      const sheet = workbook.Sheets[name]
+      const rows = sheet
+        ? XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' })
+        : []
+      const truncated = rows.length > EXCEL_PREVIEW_ROWS
+      const previewRows = rows.slice(0, EXCEL_PREVIEW_ROWS)
+      const colCount = previewRows.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 1)
+      return { name, rows: previewRows, truncated, colCount }
     })
-    if (!response.ok) {
+    viewModal.excelActiveSheet = 0
+  } catch (error) {
+    if (seq !== previewSeq) return
+    viewModal.officeError = error?.message || 'Could not load spreadsheet preview.'
+  } finally {
+    if (seq === previewSeq) viewModal.officeLoading = false
+  }
+}
+
+async function loadWordPreview(doc) {
+  const seq = previewSeq
+  viewModal.officeLoading = true
+  viewModal.officeError = ''
+  try {
+    const [buffer, previewModule] = await Promise.all([
+      fetchPreviewBuffer(doc),
+      import('docx-preview'),
+    ])
+    if (seq !== previewSeq) return
+
+    await nextTick()
+    if (!wordPreviewEl.value) {
       throw new Error('Could not load file preview.')
     }
-    viewModal.csvContent = await response.text()
+    wordPreviewEl.value.innerHTML = ''
+    const renderAsync = previewModule.renderAsync ?? previewModule.default?.renderAsync
+    await renderAsync(buffer, wordPreviewEl.value, undefined, {
+      className: 'docx-wrapper',
+      inWrapper: true,
+      ignoreWidth: false,
+      breakPages: true,
+    })
   } catch (error) {
-    viewModal.csvError = error?.message || 'Could not load file preview.'
+    if (seq !== previewSeq) return
+    viewModal.officeError = error?.message || 'Could not load document preview.'
   } finally {
-    viewModal.csvLoading = false
+    if (seq === previewSeq) viewModal.officeLoading = false
+  }
+}
+
+async function loadPowerpointPreview(doc) {
+  const seq = previewSeq
+  viewModal.officeLoading = true
+  viewModal.officeError = ''
+  try {
+    const [buffer, pptxModule] = await Promise.all([
+      fetchPreviewBuffer(doc),
+      import('pptx-preview'),
+    ])
+    if (seq !== previewSeq) return
+
+    await nextTick()
+    if (!pptxPreviewEl.value) {
+      throw new Error('Could not load file preview.')
+    }
+    pptxPreviewEl.value.innerHTML = ''
+    const init = pptxModule.init ?? pptxModule.default?.init
+    const width = Math.min(Math.max(pptxPreviewEl.value.clientWidth - 32, 320), 960)
+    const height = Math.round(width * 9 / 16)
+    pptxViewer = init(pptxPreviewEl.value, { width, height, mode: 'list' })
+    await pptxViewer.preview(buffer)
+  } catch (error) {
+    if (seq !== previewSeq) return
+    viewModal.officeError = error?.message || 'Could not load presentation preview.'
+  } finally {
+    if (seq === previewSeq) viewModal.officeLoading = false
   }
 }
 
@@ -922,3 +1130,30 @@ function formatFileSize(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB'
 }
 </script>
+
+<style>
+.excel-preview-table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: 12px;
+  color: #111;
+}
+.excel-preview-table td {
+  border: 1px solid #d4d4d4;
+  padding: 4px 8px;
+  white-space: nowrap;
+  max-width: 28rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: #fff;
+}
+.excel-preview-table tr:first-child td {
+  font-weight: 600;
+  background: #f4f4f5;
+}
+.docx-wrapper {
+  background: #fff;
+  margin: 0 auto;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
+}
+</style>

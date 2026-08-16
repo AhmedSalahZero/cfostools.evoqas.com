@@ -142,6 +142,87 @@ class DataRoomDocumentTest extends TestCase
         $this->assertSame($contents, $response->streamedContent());
     }
 
+    public function test_view_streams_docx_inline(): void
+    {
+        $contents = 'PK-docx-bytes';
+        $documentId = $this->storeDocument([
+            'name' => 'ffq',
+            'path' => "data-room/{$this->company->id}/ffq.docx",
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'contents' => $contents,
+        ]);
+
+        $response = $this->actingAs($this->user)->get(route('data-room.view', [
+            'company' => $this->company->id,
+            'document' => $documentId,
+        ]));
+
+        $response->assertOk();
+
+        $disposition = strtolower((string) $response->headers->get('content-disposition'));
+        $this->assertStringStartsWith('inline', $disposition);
+        $this->assertStringContainsString('ffq.docx', $disposition);
+        $this->assertStringContainsString(
+            'wordprocessingml',
+            strtolower((string) $response->headers->get('content-type'))
+        );
+        $this->assertSame($contents, $response->streamedContent());
+    }
+
+    public function test_view_streams_xlsx_inline(): void
+    {
+        $contents = 'PK-xlsx-bytes';
+        $documentId = $this->storeDocument([
+            'name' => 'Q3 Numbers',
+            'path' => "data-room/{$this->company->id}/q3.xlsx",
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'contents' => $contents,
+        ]);
+
+        $response = $this->actingAs($this->user)->get(route('data-room.view', [
+            'company' => $this->company->id,
+            'document' => $documentId,
+        ]));
+
+        $response->assertOk();
+
+        $disposition = strtolower((string) $response->headers->get('content-disposition'));
+        $this->assertStringStartsWith('inline', $disposition);
+        $this->assertStringContainsString('q3 numbers.xlsx', $disposition);
+        $this->assertStringContainsString(
+            'spreadsheetml',
+            strtolower((string) $response->headers->get('content-type'))
+        );
+        $this->assertSame($contents, $response->streamedContent());
+    }
+
+    public function test_view_streams_pptx_inline(): void
+    {
+        $contents = 'PK-pptx-bytes';
+        $documentId = $this->storeDocument([
+            'name' => 'Board Deck',
+            'path' => "data-room/{$this->company->id}/board.pptx",
+            'mime_type' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'contents' => $contents,
+        ]);
+
+        $response = $this->actingAs($this->user)->get(route('data-room.view', [
+            'company' => $this->company->id,
+            'document' => $documentId,
+        ]));
+
+        $response->assertOk();
+
+        $disposition = strtolower((string) $response->headers->get('content-disposition'));
+        $this->assertStringStartsWith('inline', $disposition);
+        $this->assertStringContainsString('board deck.pptx', $disposition);
+        $this->assertStringContainsString(
+            'presentationml',
+            strtolower((string) $response->headers->get('content-type'))
+        );
+        $this->assertSame($contents, $response->streamedContent());
+    }
+
     public function test_guest_cannot_view_or_download_documents(): void
     {
         $documentId = $this->storeDocument([
