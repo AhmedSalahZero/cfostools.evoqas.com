@@ -22,9 +22,6 @@ chmod -R 775 bootstrap/cache
 echo ">>> Running migrations"
 /usr/local/bin/ea-php84 artisan migrate --force
 
-echo ">>> Building frontend"
-  npm install --no-audit --no-fund
-  npm run build
 
 echo ">>> Linking storage"
 /usr/local/bin/ea-php84 artisan storage:link
