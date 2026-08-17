@@ -74,6 +74,9 @@ private function getDefinitions($orgId, $companyId = null)  // ← Added company
 // =============================================================================
         
 
+
+
+
         // Default period: current month
         $periodType  = request('period_type',  'monthly');
         $periodLabel = request('period_label', now()->format('Y-m'));
