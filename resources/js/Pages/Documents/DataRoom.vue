@@ -472,17 +472,59 @@
     <Teleport to="body">
       <div v-if="viewModal.show"
         class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col p-4">
-        <div class="bg-mp-card rounded-2xl border border-mp-border shadow-2xl w-full max-w-6xl mx-auto flex flex-col overflow-hidden"
-          style="height: min(92vh, 920px);">
+        <div :class="[
+            'bg-mp-card rounded-2xl border border-mp-border shadow-2xl w-full mx-auto flex flex-col overflow-hidden',
+            viewModal.editing ? 'max-w-none' : 'max-w-6xl'
+          ]"
+          :style="viewModal.editing ? 'height: 96vh;' : 'height: min(92vh, 920px);'">
 
           <div class="flex items-center justify-between gap-4 px-5 py-3.5 border-b border-mp-border flex-shrink-0">
             <div class="min-w-0">
               <p class="text-white font-bold text-sm truncate" :title="viewModal.doc?.name">
                 {{ viewModal.doc?.name }}
               </p>
-              <p class="text-white/70 text-xs mt-0.5">{{ fileTypeLabel(viewModal.doc?.mime_type) }}</p>
+              <p class="text-white/70 text-xs mt-0.5">
+                {{ fileTypeLabel(viewModal.doc?.mime_type) }}
+                <span v-if="viewModal.editing" class="text-mp-teal font-semibold"> · Editing — formulas calculate live</span>
+              </p>
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
+
+              <!-- Edit / Save / Cancel -->
+              <button v-if="canEditSheet && !viewModal.editing" type="button" @click="startEditing"
+                class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mp-warning/20 hover:bg-mp-warning text-white text-xs font-semibold transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+                </svg>
+                Edit
+              </button>
+
+              <template v-if="viewModal.editing">
+                <span v-if="viewModal.editFlash"
+                  :class="viewModal.editFlash.type === 'success' ? 'text-mp-success' : 'text-mp-danger'"
+                  class="text-xs font-semibold px-2">
+                  {{ viewModal.editFlash.text }}
+                </span>
+                <button type="button" @click="saveEditing"
+                  :disabled="viewModal.saving || viewModal.editLoading || !!viewModal.editError"
+                  class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mp-success hover:bg-mp-success text-white text-xs font-semibold transition-colors disabled:opacity-50">
+                  <svg v-if="viewModal.saving" class="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-4-4v8m0 0l3-3m-3 3l-3-3"/>
+                  </svg>
+                  {{ viewModal.saving ? 'Saving…' : 'Save Changes' }}
+                </button>
+                <button type="button" @click="stopEditing()"
+                  class="px-3 py-2 rounded-lg bg-mp-card-hover hover:bg-mp-page text-white text-xs font-semibold transition-colors">
+                  Cancel
+                </button>
+              </template>
+
               <a v-if="viewModal.doc"
                 :href="`/portfolio-companies/${company.id}/data-room/${viewModal.doc.id}/download`"
                 class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-mp-teal/10 hover:bg-mp-teal text-white text-xs font-semibold transition-colors">
@@ -503,7 +545,25 @@
           </div>
 
           <div class="flex-1 min-h-0 bg-mp-page">
-            <iframe v-if="viewKind === 'pdf'"
+
+            <!-- ── EDIT MODE: live spreadsheet editor ── -->
+            <div v-if="viewModal.editing" class="w-full h-full min-h-0">
+              <div v-if="viewModal.editLoading" class="w-full h-full flex items-center justify-center text-white text-sm">
+                Loading spreadsheet for editing…
+              </div>
+              <div v-else-if="viewModal.editError" class="w-full h-full flex items-center justify-center p-8">
+                <p class="text-mp-danger text-sm text-center">{{ viewModal.editError }}</p>
+              </div>
+              <UniverSheetEditor
+                v-else
+                ref="sheetEditor"
+                :sheets="viewModal.editSheets"
+                :workbook-name="viewModal.doc?.name || 'Workbook'"
+                @ready="captureEditBaseline"
+                @error="viewModal.editError = $event"/>
+            </div>
+
+            <iframe v-else-if="viewKind === 'pdf'"
               :src="viewUrl"
               class="w-full h-full border-0 bg-white"
               title="Document preview"/>
@@ -659,6 +719,7 @@
 import { ref, reactive, computed, nextTick } from 'vue'
 import { Head, Link, router, useForm, usePage } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
+import UniverSheetEditor from '@/Components/UniverSheetEditor.vue'
 
 const props = defineProps({
   company:       Object,
@@ -823,6 +884,9 @@ const pptxPreviewEl = ref(null)
 let previewSeq = 0
 let pptxViewer = null
 
+const sheetEditor   = ref(null)
+let   editFlashTimer = null
+
 const viewModal = reactive({
   show:             false,
   doc:              null,
@@ -831,9 +895,26 @@ const viewModal = reactive({
   officeError:      '',
   excelSheets:      [],
   excelActiveSheet: 0,
+  // ── live editing ──
+  editing:          false,
+  editLoading:      false,
+  editError:        '',
+  editSheets:       {},
+  saving:           false,
+  editFlash:        null,
+  editBaseline:     null,
 })
 
 const viewKind = computed(() => previewKind(viewModal.doc?.mime_type))
+
+// Only real spreadsheets can go through the live editor — a .txt served as
+// text/csv previews as text but is not a grid.
+const canEditSheet = computed(() => {
+  const doc = viewModal.doc
+  if (!doc) return false
+  const ext = (doc.name || '').split('.').pop().toLowerCase()
+  return ['xlsx', 'xls', 'csv'].includes(ext)
+})
 
 const viewUrl = computed(() => {
   if (!viewModal.doc) return ''
@@ -879,6 +960,7 @@ function resetViewPreview() {
 
 function openViewModal(doc) {
   viewModal.doc = doc
+  resetEditing()
   resetViewPreview()
   viewModal.show = true
 
@@ -890,9 +972,125 @@ function openViewModal(doc) {
 }
 
 function closeViewModal() {
+  if (viewModal.editing && !confirmDiscardEdits()) return
+  resetEditing()
   resetViewPreview()
   viewModal.show = false
   viewModal.doc = null
+}
+
+// ── Live Spreadsheet Editing ───────────────────────────────────────────────────
+function sheetsUrl(doc) {
+  return `/portfolio-companies/${props.company.id}/data-room/${doc.id}/sheets`
+}
+
+// Dirty check by comparing against a baseline taken through the exact same
+// export path, so type coercions inside Univer never register as a change.
+async function captureEditBaseline() {
+  await nextTick()
+  try {
+    viewModal.editBaseline = JSON.stringify(sheetEditor.value?.getSheets() ?? null)
+  } catch (_) {
+    viewModal.editBaseline = null
+  }
+}
+
+function hasUnsavedEdits() {
+  if (viewModal.editBaseline === null) return true
+  try {
+    return JSON.stringify(sheetEditor.value?.getSheets() ?? null) !== viewModal.editBaseline
+  } catch (_) {
+    return true
+  }
+}
+
+function confirmDiscardEdits() {
+  if (!hasUnsavedEdits()) return true
+  return window.confirm('Discard unsaved changes to this spreadsheet?')
+}
+
+function resetEditing() {
+  if (editFlashTimer) clearTimeout(editFlashTimer)
+  viewModal.editing     = false
+  viewModal.editLoading = false
+  viewModal.editError   = ''
+  viewModal.editSheets  = {}
+  viewModal.saving      = false
+  viewModal.editFlash   = null
+  viewModal.editBaseline = null
+}
+
+async function startEditing() {
+  const doc = viewModal.doc
+  if (!doc || !canEditSheet.value) return
+
+  viewModal.editing     = true
+  viewModal.editLoading = true
+  viewModal.editError   = ''
+  viewModal.editSheets  = {}
+  viewModal.editFlash   = null
+
+  try {
+    const { data } = await window.axios.get(sheetsUrl(doc))
+    if (!viewModal.editing) return
+    viewModal.editSheets = data?.sheets ?? {}
+    if (Object.keys(viewModal.editSheets).length === 0) {
+      viewModal.editError = 'This file has no sheets to edit.'
+    }
+  } catch (error) {
+    if (!viewModal.editing) return
+    viewModal.editError = error?.response?.data?.message || 'Could not open this file for editing.'
+  } finally {
+    if (viewModal.editing) viewModal.editLoading = false
+  }
+}
+
+function stopEditing(skipConfirm = false) {
+  if (!skipConfirm && !confirmDiscardEdits()) return
+  resetEditing()
+}
+
+async function saveEditing() {
+  if (viewModal.saving || !viewModal.doc) return
+
+  let payload
+  try {
+    payload = sheetEditor.value?.getSheets()
+  } catch (error) {
+    showEditFlash('error', error?.message || 'Could not read sheet data to save.')
+    return
+  }
+  if (!payload) {
+    showEditFlash('error', 'Editor not ready yet.')
+    return
+  }
+
+  viewModal.saving = true
+  const doc = viewModal.doc
+
+  try {
+    const { data } = await window.axios.post(
+      sheetsUrl(doc),
+      { sheets: payload },
+      { withXSRFToken: true },
+    )
+    showEditFlash('success', data?.message || 'Saved successfully.')
+    captureEditBaseline()
+
+    // Refresh the read-only preview underneath so it reflects the saved file
+    if (previewKind(doc.mime_type) === 'excel')      loadExcelPreview(doc)
+    else if (previewKind(doc.mime_type) === 'csv')   loadCsvPreview(doc)
+  } catch (error) {
+    showEditFlash('error', error?.response?.data?.message || 'Save failed. Please try again.')
+  } finally {
+    viewModal.saving = false
+  }
+}
+
+function showEditFlash(type, text) {
+  viewModal.editFlash = { type, text }
+  if (editFlashTimer) clearTimeout(editFlashTimer)
+  editFlashTimer = setTimeout(() => { viewModal.editFlash = null }, 5000)
 }
 
 async function fetchPreviewBuffer(doc) {

@@ -7,9 +7,15 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
 
 class DocumentController extends Controller
 {
+    /** Upper bound on grid size the in-browser editor will attempt to load. */
+    private const MAX_EDITABLE_CELLS = 400000;
+
     private function authorizeDocuments(int $companyId): object
     {
         $company = $this->authorizeCompany($companyId, 'documents');
@@ -154,6 +160,101 @@ class DocumentController extends Controller
         );
     }
 
+    // =========================================================================
+    // SPREADSHEET EDITING — read the workbook as JSON for the in-viewer editor
+    // =========================================================================
+    public function sheets($companyId, $documentId)
+    {
+        $doc = $this->resolveDocument((int) $companyId, $documentId);
+        abort_unless($this->isEditableSpreadsheet($doc), 422, 'This file cannot be edited as a spreadsheet.');
+
+        set_time_limit(120);
+        ini_set('memory_limit', '512M');
+
+        $fullPath = Storage::disk('private')->path($doc->path);
+        clearstatcache(true, $fullPath);
+
+        return response()->json(['sheets' => $this->readSheets($fullPath)]);
+    }
+
+    // =========================================================================
+    // SPREADSHEET EDITING — write the edited cells back into the original file
+    // =========================================================================
+    public function saveSheets(Request $request, $companyId, $documentId)
+    {
+        $doc = $this->resolveDocument((int) $companyId, $documentId);
+        abort_unless($this->isEditableSpreadsheet($doc), 422, 'This file cannot be edited as a spreadsheet.');
+
+        $request->validate(['sheets' => ['required', 'array']]);
+
+        set_time_limit(120);
+        ini_set('memory_limit', '512M');
+
+        $fullPath = Storage::disk('private')->path($doc->path);
+
+        // Load with styles intact so untouched formatting survives the round-trip
+        $spreadsheet = IOFactory::load($fullPath);
+        $allSheets   = $spreadsheet->getAllSheets();
+
+        foreach ($request->input('sheets') as $sheetName => $rows) {
+            if (!is_array($rows)) {
+                continue;
+            }
+
+            $worksheet = $spreadsheet->getSheetByName((string) $sheetName);
+
+            // Fallback for sheets sent back as "sheet_0", "sheet_1", …
+            if (!$worksheet && preg_match('/^sheet_(\d+)$/', (string) $sheetName, $m)) {
+                $worksheet = $allSheets[(int) $m[1]] ?? null;
+            }
+
+            if (!$worksheet) {
+                continue;
+            }
+
+            // Remember the old data extent so cells the user emptied get cleared
+            $oldMaxRow = $worksheet->getHighestDataRow();
+            $oldMaxCol = Coordinate::columnIndexFromString($worksheet->getHighestDataColumn());
+
+            $newMaxRow = 0;
+            $newMaxCol = 0;
+
+            foreach ($rows as $rowIdx => $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $newMaxRow = max($newMaxRow, (int) $rowIdx + 1);
+                $newMaxCol = max($newMaxCol, count($row));
+
+                foreach ($row as $colIdx => $value) {
+                    $cell = $worksheet->getCellByColumnAndRow((int) $colIdx + 1, (int) $rowIdx + 1);
+                    $cell->setValue(($value === null || $value === '') ? null : $value);
+                }
+            }
+
+            // Blank out anything left over outside the edited range
+            for ($r = 1; $r <= $oldMaxRow; $r++) {
+                for ($c = 1; $c <= $oldMaxCol; $c++) {
+                    if ($r <= $newMaxRow && $c <= $newMaxCol) {
+                        continue;
+                    }
+                    $worksheet->getCellByColumnAndRow($c, $r)->setValue(null);
+                }
+            }
+        }
+
+        IOFactory::createWriter($spreadsheet, $this->writerTypeFor($doc))->save($fullPath);
+        $spreadsheet->disconnectWorksheets();
+        unset($spreadsheet);
+
+        DB::table('documents')->where('id', $doc->id)->update(['updated_at' => now()]);
+
+        return response()->json([
+            'success' => true,
+            'message' => "'{$doc->name}' saved successfully.",
+        ]);
+    }
+
     public function destroy($companyId, $documentId)
     {
         $this->authorizeDocuments((int) $companyId);
@@ -170,6 +271,93 @@ class DocumentController extends Controller
         DB::table('documents')->where('id', $documentId)->delete();
 
         return back()->with('success', "'{$doc->name}' deleted.");
+    }
+
+    /**
+     * Only real spreadsheets (xlsx / xls / csv) can go through the live editor.
+     * Checked on the extension so a .txt uploaded as text/csv is not treated as a grid.
+     */
+    private function isEditableSpreadsheet(object $doc): bool
+    {
+        return in_array($this->resolveExtension($doc->path ?? null, $doc->mime_type ?? null), ['xlsx', 'xls', 'csv'], true);
+    }
+
+    private function writerTypeFor(object $doc): string
+    {
+        return match ($this->resolveExtension($doc->path ?? null, $doc->mime_type ?? null)) {
+            'xls'   => 'Xls',
+            'csv'   => 'Csv',
+            default => 'Xlsx',
+        };
+    }
+
+    /**
+     * Read a workbook into { sheetName: { rows: [[..]], formats: { "r,c": "#,##0.00" } } }.
+     * Formulas are kept as strings ("=SUM(A1:A5)") so Univer evaluates them live and
+     * they survive the round-trip back into Excel.
+     */
+    private function readSheets(string $fullPath): array
+    {
+        $reader = IOFactory::createReader(IOFactory::identify($fullPath));
+        // Must NOT use setReadDataOnly(true) — number formats and formulas are needed
+        $reader->setReadDataOnly(false);
+        if (method_exists($reader, 'setIncludeCharts')) {
+            $reader->setIncludeCharts(false);
+        }
+
+        $spreadsheet = $reader->load($fullPath);
+        $sheets      = [];
+
+        foreach ($spreadsheet->getWorksheetIterator() as $ws) {
+            $maxRow = $ws->getHighestDataRow();
+            $maxCol = Coordinate::columnIndexFromString($ws->getHighestDataColumn());
+
+            if ($maxRow < 1 || $maxCol < 1) {
+                $sheets[$ws->getTitle()] = ['rows' => [], 'formats' => (object) []];
+                continue;
+            }
+
+            abort_if(
+                $maxRow * $maxCol > self::MAX_EDITABLE_CELLS,
+                422,
+                'This spreadsheet is too large to edit in the browser. Download it instead.'
+            );
+
+            // calculateFormulas=false keeps "=SUM(...)"; formatData=false keeps raw values
+            $rows = $ws->rangeToArray(
+                'A1:' . $ws->getHighestDataColumn() . $maxRow,
+                '',
+                false,
+                false,
+                false
+            );
+
+            // Number formats, read via the style index so we only touch cells that exist
+            $formats  = [];
+            $fmtByXf  = [];
+            foreach ($ws->getCoordinates(false) as $coord) {
+                $xf = $ws->getCell($coord)->getXfIndex();
+                if (!array_key_exists($xf, $fmtByXf)) {
+                    $fmtByXf[$xf] = $spreadsheet->getCellXfByIndex($xf)?->getNumberFormat()->getFormatCode() ?? '';
+                }
+                $code = $fmtByXf[$xf];
+                if ($code === '' || $code === NumberFormat::FORMAT_GENERAL) {
+                    continue;
+                }
+                [$col, $row] = Coordinate::coordinateFromString($coord);
+                $formats[((int) $row - 1) . ',' . (Coordinate::columnIndexFromString($col) - 1)] = $code;
+            }
+
+            $sheets[$ws->getTitle()] = [
+                'rows'    => $rows,
+                'formats' => $formats ?: (object) [],
+            ];
+        }
+
+        $spreadsheet->disconnectWorksheets();
+        unset($spreadsheet);
+
+        return $sheets;
     }
 
     private function resolveDocument(int $companyId, $documentId): object

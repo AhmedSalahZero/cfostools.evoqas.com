@@ -295,6 +295,8 @@ Route::middleware(['auth'])->group(function () {
         Route::post('/',                       [App\Http\Controllers\DocumentController::class, 'store'])->name('store');
         Route::get('/{document}/download',     [App\Http\Controllers\DocumentController::class, 'download'])->name('download');
         Route::get('/{document}/view',         [App\Http\Controllers\DocumentController::class, 'view'])->name('view');
+        Route::get('/{document}/sheets',       [App\Http\Controllers\DocumentController::class, 'sheets'])->name('sheets');
+        Route::post('/{document}/sheets',      [App\Http\Controllers\DocumentController::class, 'saveSheets'])->name('save-sheets');
         Route::patch('/{document}/rename',     [App\Http\Controllers\DocumentController::class, 'rename'])->name('rename');
         Route::delete('/{document}',           [App\Http\Controllers\DocumentController::class, 'destroy'])->name('destroy');
     });
