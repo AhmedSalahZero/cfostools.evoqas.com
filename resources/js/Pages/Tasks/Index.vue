@@ -1,5 +1,5 @@
 <template>
-  <Head title="My Tasks" />
+  <Head title="To Do List" />
   <AuthenticatedLayout>
     <div class="min-h-screen bg-mp-page text-white">
 
@@ -9,7 +9,7 @@
           <div class="flex items-center justify-between">
             <div>
               <h1 class="text-2xl font-bold text-white flex items-center gap-2">
-                ✅ My Tasks
+                ✅ To Do List
               </h1>
               <p class="text-white text-sm mt-1">
                 {{ counts.total }} task{{ counts.total !== 1 ? 's' : '' }} ·

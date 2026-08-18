@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use App\Models\PortfolioCompany;
@@ -17,8 +18,42 @@ class ProjectController extends Controller
 
     private function getCompany(int $companyId): object
     {
-        $company = $this->authorizeCompany($companyId);
+        $company = $this->authorizeCompany($companyId, 'projects');
         return (object) ['id' => $company->id, 'name' => $company->name, 'organization_id' => $company->organization_id];
+    }
+
+    private function companyUsersForAssignment(int $companyId)
+    {
+        $users = DB::table('user_company_assignments as uca')
+            ->join('users as u', 'u.id', '=', 'uca.user_id')
+            ->where('uca.portfolio_company_id', $companyId)
+            ->select('u.id', 'u.name')
+            ->distinct()
+            ->get()
+            ->keyBy('id');
+
+        $authUser = Auth::user();
+        if ($authUser && !$users->has($authUser->id)) {
+            $users->put($authUser->id, (object) ['id' => $authUser->id, 'name' => $authUser->name]);
+        }
+
+        return $users->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)->values();
+    }
+
+    private function assigneeInsertPayload(int $taskId, int $userId): array
+    {
+        $payload = [
+            'project_task_id' => $taskId,
+            'user_id' => $userId,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+
+        if (Schema::hasColumn('project_task_assignees', 'seen_at')) {
+            $payload['seen_at'] = null;
+        }
+
+        return $payload;
     }
 
     /** Build full project data including tasks, assignees, logs, expenses */
@@ -184,11 +219,7 @@ class ProjectController extends Controller
         });
 
         // Users assigned to this company for task assignment
-        $companyUsers = DB::table('user_company_assignments as uca')
-            ->join('users as u', 'u.id', '=', 'uca.user_id')
-            ->where('uca.portfolio_company_id', $company)
-            ->select('u.id', 'u.name')
-            ->get();
+        $companyUsers = $this->companyUsersForAssignment($company);
 
         // Cost rates for this company
         $costRates = DB::table('user_cost_rates')
@@ -216,11 +247,7 @@ class ProjectController extends Controller
 
         $data = $this->buildProjectDetail($project);
 
-        $companyUsers = DB::table('user_company_assignments as uca')
-            ->join('users as u', 'u.id', '=', 'uca.user_id')
-            ->where('uca.portfolio_company_id', $company)
-            ->select('u.id', 'u.name')
-            ->get();
+        $companyUsers = $this->companyUsersForAssignment($company);
 
         return Inertia::render('Projects/Show', [
             'company'      => ['id' => $co->id, 'name' => $co->name],
@@ -327,13 +354,8 @@ class ProjectController extends Controller
         ]);
 
         // Assign users
-        foreach ($data['assignee_ids'] ?? [] as $uid) {
-            DB::table('project_task_assignees')->insertOrIgnore([
-                'project_task_id' => $taskId,
-                'user_id'         => $uid,
-                'created_at'      => now(),
-                'updated_at'      => now(),
-            ]);
+        foreach (array_slice($data['assignee_ids'] ?? [], 0, 1) as $uid) {
+            DB::table('project_task_assignees')->insertOrIgnore($this->assigneeInsertPayload($taskId, (int) $uid));
         }
 
         return response()->json(['success' => true, 'id' => $taskId]);
@@ -375,13 +397,8 @@ class ProjectController extends Controller
 
         // Re-sync assignees
         DB::table('project_task_assignees')->where('project_task_id', $task)->delete();
-        foreach ($data['assignee_ids'] ?? [] as $uid) {
-            DB::table('project_task_assignees')->insertOrIgnore([
-                'project_task_id' => $task,
-                'user_id'         => $uid,
-                'created_at'      => now(),
-                'updated_at'      => now(),
-            ]);
+        foreach (array_slice($data['assignee_ids'] ?? [], 0, 1) as $uid) {
+            DB::table('project_task_assignees')->insertOrIgnore($this->assigneeInsertPayload($task, (int) $uid));
         }
 
         return response()->json(['success' => true]);

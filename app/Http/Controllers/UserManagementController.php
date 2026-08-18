@@ -10,6 +10,7 @@ use App\Models\UserCompanyAssignment;
 use App\Models\UserCompanyPermission;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Spatie\Permission\Models\Role;
 
@@ -30,6 +31,10 @@ class UserManagementController extends Controller
         'financial_planning'     => 'Financial Planning',
         'financial_model_studio' => 'Financial Model Studio',
         'documents'              => 'Documents',
+        'contracts'              => 'Contracts',
+        'surveys'                => 'Surveys',
+        'statistica'             => 'Statistica',
+        'projects'               => 'Projects & Tasks',
     ];
 
     public function index()
@@ -42,7 +47,14 @@ class UserManagementController extends Controller
             });
 
         if (!$authUser->hasRole('super-admin')) {
-            $query->where('organization_id', $authUser->organization_id);
+            $orgId = (int) $authUser->organization_id;
+
+            $query->where(function ($builder) use ($orgId) {
+                $builder->where('organization_id', $orgId)
+                    ->orWhereHas('assignedCompanies', function ($companyQuery) use ($orgId) {
+                        $companyQuery->where('organization_id', $orgId);
+                    });
+            });
         }
 
         $users = $query->get()->map(function ($user) {
@@ -101,9 +113,12 @@ class UserManagementController extends Controller
             'assigned_companies.*.permissions.*' => ['string', Rule::in(array_keys(self::PERMISSIONS))],
         ]);
 
+        $assignedCompanies = $this->validatedCompanies($validated['assigned_companies'] ?? []);
+        $organizationId = $this->resolveOrganizationIdForUser($authUser, $assignedCompanies);
+
         // Create user — no global role anymore
         $user = User::create([
-            'organization_id' => $authUser->organization_id,
+            'organization_id' => $organizationId,
             'name'            => $validated['name'],
             'email'           => $validated['email'],
             'password'        => Hash::make($validated['password']),
@@ -133,6 +148,7 @@ class UserManagementController extends Controller
     public function edit(User $user)
     {
         $authUser = Auth::user();
+        $this->authorizeManagedUser($authUser, $user);
 
         $companiesQuery = $authUser->hasRole('super-admin')
             ? PortfolioCompany::query()
@@ -170,6 +186,9 @@ class UserManagementController extends Controller
 
     public function update(Request $request, User $user)
     {
+        $authUser = Auth::user();
+        $this->authorizeManagedUser($authUser, $user);
+
         $validated = $request->validate([
             'name'                             => ['required', 'string', 'max:255'],
             'email'                            => ['required', 'email', Rule::unique('users', 'email')->ignore($user->id)],
@@ -181,8 +200,12 @@ class UserManagementController extends Controller
             'assigned_companies.*.permissions.*' => ['string', Rule::in(array_keys(self::PERMISSIONS))],
         ]);
 
+        $assignedCompanies = $this->validatedCompanies($validated['assigned_companies'] ?? []);
+        $organizationId = $this->resolveOrganizationIdForUser($authUser, $assignedCompanies);
+
         $user->name  = $validated['name'];
         $user->email = $validated['email'];
+        $user->organization_id = $organizationId;
         if (!empty($validated['password'])) {
             $user->password = Hash::make($validated['password']);
         }
@@ -214,11 +237,69 @@ class UserManagementController extends Controller
 
     public function destroy(User $user)
     {
+        $this->authorizeManagedUser(Auth::user(), $user);
+
         UserCompanyAssignment::where('user_id', $user->id)->delete();
         UserCompanyPermission::where('user_id', $user->id)->delete();
         $user->delete();
 
         return redirect()->route('users.index')
             ->with('flash', ['success' => 'User deleted successfully.']);
+    }
+
+    private function validatedCompanies(array $assignedCompanies): Collection
+    {
+        if (empty($assignedCompanies)) {
+            return collect();
+        }
+
+        return PortfolioCompany::query()
+            ->whereIn('id', collect($assignedCompanies)->pluck('id')->all())
+            ->get(['id', 'organization_id']);
+    }
+
+    private function resolveOrganizationIdForUser(User $authUser, Collection $assignedCompanies): ?int
+    {
+        if (!$authUser->hasRole('super-admin')) {
+            $this->ensureCompaniesBelongToOrganization($assignedCompanies, (int) $authUser->organization_id);
+            return (int) $authUser->organization_id;
+        }
+
+        if ($assignedCompanies->isEmpty()) {
+            return $authUser->organization_id ? (int) $authUser->organization_id : null;
+        }
+
+        $orgIds = $assignedCompanies->pluck('organization_id')->unique()->values();
+        abort_if($orgIds->count() !== 1, 422, 'Assigned companies must belong to the same organization.');
+
+        return (int) $orgIds->first();
+    }
+
+    private function ensureCompaniesBelongToOrganization(Collection $assignedCompanies, int $organizationId): void
+    {
+        abort_if(
+            $assignedCompanies->contains(fn ($company) => (int) $company->organization_id !== $organizationId),
+            403,
+            'You cannot manage users for another organization.'
+        );
+    }
+
+    private function authorizeManagedUser(User $authUser, User $user): void
+    {
+        if ($authUser->hasRole('super-admin')) {
+            return;
+        }
+
+        abort_if($user->hasRole('super-admin'), 403, 'You cannot manage this user.');
+
+        $organizationId = (int) $authUser->organization_id;
+        $assignedCompanyIds = $user->assignedCompanies()->pluck('portfolio_companies.organization_id');
+        $hasAssignedCompanyInOrg = $assignedCompanyIds->contains(fn ($orgId) => (int) $orgId === $organizationId);
+
+        abort_unless(
+            (int) $user->organization_id === $organizationId || $hasAssignedCompanyInOrg,
+            403,
+            'You cannot manage this user.'
+        );
     }
 }

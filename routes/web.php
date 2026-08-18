@@ -293,6 +293,12 @@ Route::middleware(['auth'])->group(function () {
     ->group(function () {
         Route::get('/',                        [App\Http\Controllers\DocumentController::class, 'index'])->name('index');
         Route::post('/',                       [App\Http\Controllers\DocumentController::class, 'store'])->name('store');
+        Route::post('/sections',               [App\Http\Controllers\DocumentController::class, 'storeSection'])->name('sections.store');
+        Route::patch('/sections/{section}',    [App\Http\Controllers\DocumentController::class, 'updateSection'])->name('sections.update');
+        Route::delete('/sections/{section}',   [App\Http\Controllers\DocumentController::class, 'destroySection'])->name('sections.destroy');
+        Route::post('/sections/{section}/subsections',              [App\Http\Controllers\DocumentController::class, 'storeSubsection'])->name('subsections.store');
+        Route::patch('/subsections/{subsection}',                   [App\Http\Controllers\DocumentController::class, 'updateSubsection'])->name('subsections.update');
+        Route::delete('/subsections/{subsection}',                  [App\Http\Controllers\DocumentController::class, 'destroySubsection'])->name('subsections.destroy');
         Route::get('/{document}/download',     [App\Http\Controllers\DocumentController::class, 'download'])->name('download');
         Route::get('/{document}/view',         [App\Http\Controllers\DocumentController::class, 'view'])->name('view');
         Route::get('/{document}/sheets',       [App\Http\Controllers\DocumentController::class, 'sheets'])->name('sheets');
@@ -487,6 +493,8 @@ Route::prefix('tasks')->name('tasks.')->group(function () {
     Route::delete('/{task}',       [App\Http\Controllers\UserTaskController::class, 'destroy'])->name('destroy');
     Route::get('/badge-count',     [App\Http\Controllers\UserTaskController::class, 'badgeCount'])->name('badge');
 });
+
+Route::get('/my-tasks', [App\Http\Controllers\AssignedTaskController::class, 'index'])->name('my-tasks.index');
 
 
 

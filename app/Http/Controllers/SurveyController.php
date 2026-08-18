@@ -15,6 +15,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function index(PortfolioCompany $company)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $surveys = DB::table('surveys as s')
             ->leftJoin('users as u', 'u.id', '=', 's.created_by')
             ->where('s.portfolio_company_id', $company->id)
@@ -40,6 +42,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function create(Request $request, PortfolioCompany $company)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         if (!$request->boolean('blank') && !$request->filled('from_template')) {
             $this->rememberQuestionBankOrg($company);
 
@@ -75,6 +79,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function store(Request $request, PortfolioCompany $company)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $request->validate([
             'title'       => 'required|string|max:255',
             'questions'   => 'nullable|array',
@@ -107,6 +113,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function edit(PortfolioCompany $company, $surveyId)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $survey = DB::table('surveys')->where('id', $surveyId)
             ->where('portfolio_company_id', $company->id)->firstOrFail();
 
@@ -140,6 +148,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function update(Request $request, PortfolioCompany $company, $surveyId)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $request->validate([
             'title' => 'required|string|max:255',
             ...$this->respondentFieldRules(),
@@ -166,6 +176,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function destroy(PortfolioCompany $company, $surveyId)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         DB::table('surveys')->where('id', $surveyId)
             ->where('portfolio_company_id', $company->id)->delete();
 
@@ -177,6 +189,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function publish(PortfolioCompany $company, $surveyId)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $token = Str::random(32);
         DB::table('surveys')->where('id', $surveyId)->update([
             'status'     => 'active',
@@ -191,6 +205,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function toggleStatus(PortfolioCompany $company, $surveyId)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $survey = DB::table('surveys')->where('id', $surveyId)->first();
         $newStatus = $survey->status === 'active' ? 'closed' : 'active';
         DB::table('surveys')->where('id', $surveyId)->update([
@@ -204,6 +220,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function copy(Request $request, PortfolioCompany $company, $surveyId)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $request->validate([
             'title' => 'required|string|max:255',
         ]);
@@ -267,6 +285,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function saveToBank(Request $request, PortfolioCompany $company, $surveyId)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $request->validate([
             'question_ids'  => 'required|array',
             'section_id'    => 'nullable|integer',
@@ -401,6 +421,8 @@ class SurveyController extends Controller
     // ─────────────────────────────────────────────────────────────────────────
     public function results(PortfolioCompany $company, $surveyId)
     {
+        $this->authorizeCompany($company, 'surveys');
+
         $survey = DB::table('surveys')->where('id', $surveyId)
             ->where('portfolio_company_id', $company->id)->firstOrFail();
 

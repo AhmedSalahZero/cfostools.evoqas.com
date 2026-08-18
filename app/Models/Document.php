@@ -9,6 +9,7 @@ class Document extends Model
 {
     protected $fillable = [
         'portfolio_company_id',
+        'data_room_subsection_id',
         'name',
         'path',
         'mime_type',
@@ -35,6 +36,11 @@ class Document extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(PortfolioCompany::class, 'portfolio_company_id');
+    }
+
+    public function subsection(): BelongsTo
+    {
+        return $this->belongsTo(DataRoomSubsection::class, 'data_room_subsection_id');
     }
 
     public function uploader(): BelongsTo

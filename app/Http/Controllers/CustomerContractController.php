@@ -16,6 +16,8 @@ class CustomerContractController extends Controller
 {
     public function index(PortfolioCompany $portfolioCompany)
     {
+        $this->authorizeCompany($portfolioCompany, 'contracts');
+
         $contracts = $portfolioCompany
             ->contracts()
             ->with(['services.milestones'])

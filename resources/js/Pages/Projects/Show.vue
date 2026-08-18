@@ -668,9 +668,12 @@ function closeTaskModal() {
   Object.assign(taskForm, emptyTaskForm())
 }
 function toggleAssignee(uid) {
-  const idx = taskForm.assignee_ids.indexOf(uid)
-  if (idx >= 0) taskForm.assignee_ids.splice(idx, 1)
-  else taskForm.assignee_ids.push(uid)
+  if (taskForm.assignee_ids[0] === uid) {
+    taskForm.assignee_ids.splice(0, taskForm.assignee_ids.length)
+    return
+  }
+
+  taskForm.assignee_ids.splice(0, taskForm.assignee_ids.length, uid)
 }
 
 // ── Log Modal ──

@@ -33,7 +33,8 @@
                 <span>⚖️</span>
                 Investor Decision Tool
               </Link> -->
-							<Link :href="safeOrgId ? `/organizations/${safeOrgId}/statistica` : '#'"
+							<Link v-if="canOpenStatistica"
+								:href="safeOrgId ? `/organizations/${safeOrgId}/statistica` : '#'"
 								class="flex items-center gap-2 bg-mp-success/60 hover:bg-mp-success/70 border border-mp-success/60 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
 								<span>📊</span> Statistica
 							</Link>
@@ -126,7 +127,7 @@
 											</svg>
 										</button>
 										<!-- Contracts -->
-										<Link :href="`/portfolio-companies/${customer.id}/contracts`"
+										<Link v-if="canAccess(customer, 'contracts')" :href="`/portfolio-companies/${customer.id}/contracts`"
 											class="w-8 h-8 flex items-center justify-center rounded-lg bg-mp-card-hover hover:bg-mp-gold-dark text-white hover:text-white transition-colors"
 											title="Contracts">
 											<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -284,7 +285,7 @@
 														</Link>
 														<!-- ── Data Room ── -->
 														<div class="border-t border-mp-border/50 my-1"></div>
-														<Link :href="`/portfolio-companies/${customer.id}/data-room`"
+														<Link v-if="canAccess(customer, 'documents')" :href="`/portfolio-companies/${customer.id}/data-room`"
 															class="flex items-center gap-3 px-4 py-2.5 text-sm text-white hover:bg-mp-page hover:text-white transition-colors">
 															<span
 																class="w-7 h-7 bg-mp-teal/20 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -296,7 +297,7 @@
 																</svg>
 															</span> 📁 Data Room
 														</Link>
-														<Link :href="`/portfolio-companies/${customer.id}/projects`"
+														<Link v-if="canAccess(customer, 'projects')" :href="`/portfolio-companies/${customer.id}/projects`"
 															class="flex items-center gap-3 px-4 py-2.5 text-sm text-white hover:bg-mp-page hover:text-white transition-colors">
 															<span
 																class="w-7 h-7 bg-mp-teal/20 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -310,7 +311,7 @@
 														</Link>
 														<!-- ── Surveys ── -->
 														<div class="border-t border-mp-border/50 my-1"></div>
-														<Link :href="`/portfolio-companies/${customer.id}/surveys`"
+														<Link v-if="canAccess(customer, 'surveys')" :href="`/portfolio-companies/${customer.id}/surveys`"
 															class="flex items-center gap-3 px-4 py-2.5 text-sm text-white hover:bg-mp-page hover:text-white transition-colors">
 															<span
 																class="w-7 h-7 bg-mp-gold-dark/20 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -323,7 +324,7 @@
 															</span> 📋 Surveys
 														</Link>
 														<!-- ── Statistica ── -->
-														<Link
+														<Link v-if="canAccess(customer, 'statistica')"
 															:href="safeOrgId ? `/organizations/${safeOrgId}/statistica` : '#'"
 															class="flex items-center gap-3 px-4 py-2.5 text-sm text-white hover:bg-mp-page hover:text-white transition-colors">
 															<span
@@ -418,6 +419,14 @@ const isAdmin = computed(() => {
 const customers = computed(() =>
 	(props.companies ?? []).filter(c => c.type !== 'prospect')
 )
+
+const canOpenStatistica = computed(() =>
+	customers.value.some(customer => canAccess(customer, 'statistica'))
+)
+
+function canAccess(customer, permission) {
+	return Boolean(customer?.permissions?.[permission])
+}
 
 // ── DROPDOWN ──
 const activeDropdown = ref(null)

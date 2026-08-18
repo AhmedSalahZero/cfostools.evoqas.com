@@ -32,7 +32,7 @@ class PortfolioCompanyController extends Controller
         $companies = $query
             ->orderBy('name')
             ->get()
-            ->map(function ($company) {
+            ->map(function ($company) use ($user) {
                 return [
                     'id'                    => $company->id,
                     'type'                  => $company->type,
@@ -51,6 +51,15 @@ class PortfolioCompanyController extends Controller
                     'last_financial_update' => $company->last_financial_update?->format('Y-m-d'),
                     'ebitda_multiplier'     => $company->ebitda_multiplier ? (float) $company->ebitda_multiplier : null,
                     'notes'                 => $company->notes,
+                    'permissions'           => [
+                        'contracts'  => $user->canAccessPortfolioCompany($company, 'contracts'),
+                        'documents'  => $user->canAccessPortfolioCompany($company, 'documents'),
+                        'projects'   => $user->canAccessPortfolioCompany($company, 'projects'),
+                        'surveys'    => $user->canAccessPortfolioCompany($company, 'surveys'),
+                        'statistica' => $user->hasRole('super-admin')
+                            || ($user->hasRole('admin') && (int) $user->organization_id === (int) $company->organization_id)
+                            || $user->hasCompanyPermission($company->id, 'statistica'),
+                    ],
                 ];
             });
 

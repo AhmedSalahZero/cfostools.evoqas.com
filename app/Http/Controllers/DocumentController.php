@@ -2,8 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\DataRoomSection;
+use App\Models\DataRoomSubsection;
+use App\Models\Document;
 use App\Models\PortfolioCompany;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
@@ -15,6 +20,50 @@ class DocumentController extends Controller
 {
     /** Upper bound on grid size the in-browser editor will attempt to load. */
     private const MAX_EDITABLE_CELLS = 400000;
+
+    private const DEFAULT_STRUCTURE = [
+        [
+            'legacy_key' => 'due_diligence',
+            'name' => 'Due Diligence',
+            'icon' => '🔍',
+            'default_subsection' => 'Due Diligence Materials',
+        ],
+        [
+            'legacy_key' => 'contracts_legal',
+            'name' => 'Contracts & Legal',
+            'icon' => '📜',
+            'default_subsection' => 'Legal Agreements',
+        ],
+        [
+            'legacy_key' => 'financial_documents',
+            'name' => 'Financial Documents',
+            'icon' => '💰',
+            'default_subsection' => 'Financial Files',
+        ],
+        [
+            'legacy_key' => 'corporate_documents',
+            'name' => 'Corporate Documents',
+            'icon' => '🏛️',
+            'default_subsection' => 'Corporate Records',
+        ],
+        [
+            'legacy_key' => 'operational',
+            'name' => 'Operational',
+            'icon' => '⚙️',
+            'default_subsection' => 'Operational Files',
+        ],
+        [
+            'legacy_key' => 'other',
+            'name' => 'Other',
+            'icon' => '📁',
+            'default_subsection' => 'General Files',
+        ],
+    ];
+
+    private const ICON_OPTIONS = [
+        '📁', '📂', '📄', '📋', '📊', '📎', '🔒', '📈', '🗂️', '📝',
+        '💼', '🔍', '📜', '💰', '🏛️', '⚙️', '🧾', '📦', '🗃️', '🧠',
+    ];
 
     private function authorizeDocuments(int $companyId): object
     {
@@ -32,66 +81,52 @@ class DocumentController extends Controller
         'application/msword',
         'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         'application/vnd.ms-powerpoint',
-    ];
-
-    private array $sections = [
-        'due_diligence'       => 'Due Diligence',
-        'contracts_legal'     => 'Contracts & Legal',
-        'financial_documents' => 'Financial Documents',
-        'corporate_documents' => 'Corporate Documents',
-        'operational'         => 'Operational',
-        'other'               => 'Other',
+        'application/zip',
+        'application/x-zip-compressed',
+        'application/vnd.rar',
+        'application/x-rar-compressed',
+        'application/x-rar',
+        'application/octet-stream',
     ];
 
     public function index(Request $request, $companyId)
     {
         $company = $this->authorizeDocuments((int) $companyId);
-
-        $documents = DB::table('documents')
-            ->where('portfolio_company_id', $companyId)
-            ->leftJoin('users', 'documents.uploaded_by', '=', 'users.id')
-            ->select('documents.*', 'users.name as uploader_name')
-            ->orderByDesc('documents.created_at')
-            ->get()
-            ->map(fn($doc) => [
-                'id'         => $doc->id,
-                'name'       => $doc->name,
-                'category'   => $doc->category,
-                'mime_type'  => $doc->mime_type,
-                'uploader'   => $doc->uploader_name ?? 'Unknown',
-                'created_at' => $doc->created_at,
-            ]);
-
-        $sectionCounts = [];
-        foreach (array_keys($this->sections) as $key) {
-            $sectionCounts[$key] = $documents->where('category', $key)->count();
-        }
+        $sections = $this->ensureStructure((int) $companyId);
+        $documents = $this->documentsForCompany((int) $companyId);
 
         return Inertia::render('Documents/DataRoom', [
-            'company'       => $company,
-            'documents'     => $documents->values(),
-            'sections'      => $this->sections,
-            'sectionCounts' => $sectionCounts,
-            'lastUpload'    => $documents->first()?->created_at ?? null,
+            'company'      => $company,
+            'documents'    => $documents->values(),
+            'sections'     => $sections->values(),
+            'iconOptions'  => self::ICON_OPTIONS,
+            'lastUpload'   => $documents->first()['created_at'] ?? null,
         ]);
     }
 
     public function store(Request $request, $companyId)
     {
         $this->authorizeDocuments((int) $companyId);
+        $this->ensureStructure((int) $companyId);
 
         $request->validate([
-            'file'     => ['required', 'file', 'max:51200'],
-            'category' => ['required', 'in:' . implode(',', array_keys($this->sections))],
-            'name'     => ['nullable', 'string', 'max:255'],
+            'file'          => ['required', 'file', 'max:51200'],
+            'subsection_id' => ['required', 'integer'],
+            'name'          => ['nullable', 'string', 'max:255'],
         ]);
 
         $file = $request->file('file');
         $mime = $file->getMimeType();
 
-        if (!in_array($mime, $this->allowedMimes)) {
-            return back()->with('error', 'File type not allowed. Supported: Excel, CSV, PDF, Word, PowerPoint, Images.');
+        if ($mime === 'application/octet-stream' && !in_array($file->getClientOriginalExtension(), ['zip', 'rar'], true)) {
+            return back()->with('error', 'File type not allowed. Supported: Excel, CSV, PDF, Word, PowerPoint, Images, ZIP, RAR.');
         }
+
+        if (!in_array($mime, $this->allowedMimes)) {
+            return back()->with('error', 'File type not allowed. Supported: Excel, CSV, PDF, Word, PowerPoint, Images, ZIP, RAR.');
+        }
+
+        $subsection = $this->resolveSubsection((int) $companyId, (int) $request->integer('subsection_id'));
 
         $path        = $file->store("data-room/{$companyId}", 'private');
         $displayName = $this->filenameWithExtension(
@@ -102,10 +137,11 @@ class DocumentController extends Controller
 
         DB::table('documents')->insert([
             'portfolio_company_id' => $companyId,
+            'data_room_subsection_id' => $subsection->id,
             'name'                 => $displayName,
             'path'                 => $path,
             'mime_type'            => $mime,
-            'category'             => $request->input('category'),
+            'category'             => $this->legacyCategoryForSection($subsection->section_name ?? ''),
             'uploaded_by'          => auth()->id(),
             'created_at'           => now(),
             'updated_at'           => now(),
@@ -258,10 +294,7 @@ class DocumentController extends Controller
     public function destroy($companyId, $documentId)
     {
         $this->authorizeDocuments((int) $companyId);
-        $doc = DB::table('documents')
-            ->where('id', $documentId)
-            ->where('portfolio_company_id', $companyId)
-            ->first();
+        $doc = $this->documentRecord((int) $companyId, (int) $documentId);
         abort_if(!$doc, 404);
 
         if (Storage::disk('private')->exists($doc->path)) {
@@ -271,6 +304,296 @@ class DocumentController extends Controller
         DB::table('documents')->where('id', $documentId)->delete();
 
         return back()->with('success', "'{$doc->name}' deleted.");
+    }
+
+    public function storeSection(Request $request, $companyId): RedirectResponse
+    {
+        $this->authorizeDocuments((int) $companyId);
+        $this->ensureStructure((int) $companyId);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'icon' => ['required', 'string', 'max:32'],
+        ]);
+
+        abort_unless(in_array($data['icon'], self::ICON_OPTIONS, true), 422, 'Invalid icon.');
+
+        $sortOrder = (int) DataRoomSection::where('portfolio_company_id', $companyId)->max('sort_order') + 1;
+
+        $section = DataRoomSection::create([
+            'portfolio_company_id' => $companyId,
+            'name' => $data['name'],
+            'icon' => $data['icon'],
+            'sort_order' => $sortOrder,
+        ]);
+
+        DataRoomSubsection::create([
+            'data_room_section_id' => $section->id,
+            'name' => 'General',
+            'icon' => '📄',
+            'sort_order' => 1,
+        ]);
+
+        return back()->with('success', 'Section created successfully.');
+    }
+
+    public function updateSection(Request $request, $companyId, $sectionId): RedirectResponse
+    {
+        $this->authorizeDocuments((int) $companyId);
+        $section = $this->resolveSection((int) $companyId, (int) $sectionId);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'icon' => ['required', 'string', 'max:32'],
+        ]);
+
+        abort_unless(in_array($data['icon'], self::ICON_OPTIONS, true), 422, 'Invalid icon.');
+
+        $section->update($data);
+
+        return back()->with('success', 'Section updated successfully.');
+    }
+
+    public function destroySection($companyId, $sectionId): RedirectResponse
+    {
+        $this->authorizeDocuments((int) $companyId);
+        $section = $this->resolveSection((int) $companyId, (int) $sectionId);
+
+        $this->deleteDocumentsForSubsections($section->subsections()->pluck('id'));
+        $section->delete();
+
+        return back()->with('success', 'Section deleted successfully.');
+    }
+
+    public function storeSubsection(Request $request, $companyId, $sectionId): RedirectResponse
+    {
+        $this->authorizeDocuments((int) $companyId);
+        $section = $this->resolveSection((int) $companyId, (int) $sectionId);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'icon' => ['required', 'string', 'max:32'],
+        ]);
+
+        abort_unless(in_array($data['icon'], self::ICON_OPTIONS, true), 422, 'Invalid icon.');
+
+        $sortOrder = (int) DataRoomSubsection::where('data_room_section_id', $section->id)->max('sort_order') + 1;
+
+        DataRoomSubsection::create([
+            'data_room_section_id' => $section->id,
+            'name' => $data['name'],
+            'icon' => $data['icon'],
+            'sort_order' => $sortOrder,
+        ]);
+
+        return back()->with('success', 'Subsection created successfully.');
+    }
+
+    public function updateSubsection(Request $request, $companyId, $subsectionId): RedirectResponse
+    {
+        $this->authorizeDocuments((int) $companyId);
+        $subsection = $this->resolveSubsection((int) $companyId, (int) $subsectionId);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'icon' => ['required', 'string', 'max:32'],
+        ]);
+
+        abort_unless(in_array($data['icon'], self::ICON_OPTIONS, true), 422, 'Invalid icon.');
+
+        $subsection->update($data);
+
+        return back()->with('success', 'Subsection updated successfully.');
+    }
+
+    public function destroySubsection($companyId, $subsectionId): RedirectResponse
+    {
+        $this->authorizeDocuments((int) $companyId);
+        $subsection = $this->resolveSubsection((int) $companyId, (int) $subsectionId);
+
+        $this->deleteDocumentsForSubsections(collect([$subsection->id]));
+        $subsection->delete();
+
+        return back()->with('success', 'Subsection deleted successfully.');
+    }
+
+    private function ensureStructure(int $companyId): Collection
+    {
+        if (!DataRoomSection::where('portfolio_company_id', $companyId)->exists()) {
+            foreach (self::DEFAULT_STRUCTURE as $index => $definition) {
+                $section = DataRoomSection::create([
+                    'portfolio_company_id' => $companyId,
+                    'name' => $definition['name'],
+                    'icon' => $definition['icon'],
+                    'sort_order' => $index + 1,
+                ]);
+
+                DataRoomSubsection::create([
+                    'data_room_section_id' => $section->id,
+                    'name' => $definition['default_subsection'],
+                    'icon' => '📄',
+                    'sort_order' => 1,
+                ]);
+            }
+        }
+
+        $sections = DataRoomSection::with('subsections')
+            ->where('portfolio_company_id', $companyId)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get();
+
+        $defaultMap = collect(self::DEFAULT_STRUCTURE)
+            ->keyBy('legacy_key')
+            ->map(function ($definition) use ($sections) {
+                $section = $sections->firstWhere('name', $definition['name']);
+                return [
+                    'section' => $section,
+                    'subsection' => $section?->subsections->sortBy('sort_order')->first(),
+                ];
+            });
+
+        DB::table('documents')
+            ->where('portfolio_company_id', $companyId)
+            ->whereNull('data_room_subsection_id')
+            ->orderBy('id')
+            ->get()
+            ->each(function ($document) use ($defaultMap) {
+                $legacyKey = $document->category ?: 'other';
+                $target = $defaultMap->get($legacyKey) ?? $defaultMap->get('other');
+                if (!$target || !$target['subsection']) {
+                    return;
+                }
+
+                DB::table('documents')
+                    ->where('id', $document->id)
+                    ->update([
+                        'data_room_subsection_id' => $target['subsection']->id,
+                        'category' => $legacyKey,
+                    ]);
+            });
+
+        return $this->sectionPayload((int) $companyId);
+    }
+
+    private function sectionPayload(int $companyId): Collection
+    {
+        $documents = $this->documentsForCompany($companyId);
+        $sectionCounts = $documents->groupBy('section_id')->map->count();
+        $subsectionCounts = $documents->groupBy('subsection_id')->map->count();
+
+        return DataRoomSection::with('subsections')
+            ->where('portfolio_company_id', $companyId)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get()
+            ->map(function (DataRoomSection $section) use ($sectionCounts, $subsectionCounts) {
+                return [
+                    'id' => $section->id,
+                    'name' => $section->name,
+                    'icon' => $section->icon,
+                    'count' => (int) ($sectionCounts[$section->id] ?? 0),
+                    'subsections' => $section->subsections->map(function (DataRoomSubsection $subsection) use ($subsectionCounts) {
+                        return [
+                            'id' => $subsection->id,
+                            'name' => $subsection->name,
+                            'icon' => $subsection->icon,
+                            'count' => (int) ($subsectionCounts[$subsection->id] ?? 0),
+                        ];
+                    })->values()->all(),
+                ];
+            });
+    }
+
+    private function documentsForCompany(int $companyId): Collection
+    {
+        return DB::table('documents')
+            ->where('documents.portfolio_company_id', $companyId)
+            ->leftJoin('users', 'documents.uploaded_by', '=', 'users.id')
+            ->leftJoin('data_room_subsections as drs', 'drs.id', '=', 'documents.data_room_subsection_id')
+            ->leftJoin('data_room_sections as ds', 'ds.id', '=', 'drs.data_room_section_id')
+            ->select(
+                'documents.*',
+                'users.name as uploader_name',
+                'drs.name as subsection_name',
+                'drs.icon as subsection_icon',
+                'drs.id as subsection_ref',
+                'ds.name as section_name',
+                'ds.icon as section_icon',
+                'ds.id as section_ref'
+            )
+            ->orderByDesc('documents.created_at')
+            ->get()
+            ->map(fn ($doc) => [
+                'id' => $doc->id,
+                'name' => $doc->name,
+                'mime_type' => $doc->mime_type,
+                'uploader' => $doc->uploader_name ?? 'Unknown',
+                'created_at' => $doc->created_at,
+                'section_id' => $doc->section_ref,
+                'section_name' => $doc->section_name,
+                'section_icon' => $doc->section_icon,
+                'subsection_id' => $doc->subsection_ref,
+                'subsection_name' => $doc->subsection_name,
+                'subsection_icon' => $doc->subsection_icon,
+            ]);
+    }
+
+    private function resolveSection(int $companyId, int $sectionId): DataRoomSection
+    {
+        return DataRoomSection::where('portfolio_company_id', $companyId)->findOrFail($sectionId);
+    }
+
+    private function resolveSubsection(int $companyId, int $subsectionId): object
+    {
+        $subsection = DataRoomSubsection::query()
+            ->select('data_room_subsections.*', 'ds.name as section_name')
+            ->join('data_room_sections as ds', 'ds.id', '=', 'data_room_subsections.data_room_section_id')
+            ->where('ds.portfolio_company_id', $companyId)
+            ->where('data_room_subsections.id', $subsectionId)
+            ->first();
+
+        abort_if(!$subsection, 404);
+
+        return $subsection;
+    }
+
+    private function legacyCategoryForSection(string $sectionName): string
+    {
+        foreach (self::DEFAULT_STRUCTURE as $definition) {
+            if ($definition['name'] === $sectionName) {
+                return $definition['legacy_key'];
+            }
+        }
+
+        return 'other';
+    }
+
+    private function documentRecord(int $companyId, int $documentId): ?object
+    {
+        return DB::table('documents')
+            ->where('id', $documentId)
+            ->where('portfolio_company_id', $companyId)
+            ->first();
+    }
+
+    private function deleteDocumentsForSubsections(Collection $subsectionIds): void
+    {
+        if ($subsectionIds->isEmpty()) {
+            return;
+        }
+
+        $documents = DB::table('documents')
+            ->whereIn('data_room_subsection_id', $subsectionIds->all())
+            ->get(['id', 'path']);
+
+        foreach ($documents as $document) {
+            if ($document->path && Storage::disk('private')->exists($document->path)) {
+                Storage::disk('private')->delete($document->path);
+            }
+        }
+
+        DB::table('documents')->whereIn('id', $documents->pluck('id')->all())->delete();
     }
 
     /**

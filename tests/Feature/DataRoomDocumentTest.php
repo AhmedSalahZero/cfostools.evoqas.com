@@ -265,6 +265,86 @@ class DataRoomDocumentTest extends TestCase
         ]))->assertForbidden();
     }
 
+    public function test_index_seeds_default_sections_and_migrates_legacy_documents(): void
+    {
+        $documentId = $this->storeDocument([
+            'name' => 'Legacy File',
+            'path' => "data-room/{$this->company->id}/legacy.pdf",
+            'mime_type' => 'application/pdf',
+            'contents' => '%PDF-1.4 legacy',
+            'category' => 'contracts_legal',
+        ]);
+
+        $this->actingAs($this->user)
+            ->get(route('data-room.index', ['company' => $this->company->id]))
+            ->assertOk();
+
+        $this->assertDatabaseHas('documents', [
+            'id' => $documentId,
+        ]);
+        $sectionId = DB::table('data_room_sections')
+            ->where('portfolio_company_id', $this->company->id)
+            ->where('name', 'Contracts & Legal')
+            ->value('id');
+        $this->assertNotNull($sectionId);
+        $this->assertDatabaseHas('data_room_subsections', [
+            'data_room_section_id' => $sectionId,
+            'name' => 'Legal Agreements',
+        ]);
+        $this->assertNotNull(DB::table('documents')->where('id', $documentId)->value('data_room_subsection_id'));
+        $this->assertSame(6, DB::table('data_room_sections')->where('portfolio_company_id', $this->company->id)->count());
+    }
+
+    public function test_can_upload_zip_to_subsection(): void
+    {
+        $this->actingAs($this->user)->get(route('data-room.index', ['company' => $this->company->id]));
+        $subsectionId = DB::table('data_room_subsections')->value('id');
+
+        $file = \Illuminate\Http\UploadedFile::fake()->create('bundle.zip', 10, 'application/zip');
+
+        $this->actingAs($this->user)
+            ->post(route('data-room.store', ['company' => $this->company->id]), [
+                'file' => $file,
+                'subsection_id' => $subsectionId,
+                'name' => 'bundle',
+            ])
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('documents', [
+            'portfolio_company_id' => $this->company->id,
+            'data_room_subsection_id' => $subsectionId,
+            'name' => 'bundle.zip',
+        ]);
+    }
+
+    public function test_can_manage_sections_and_subsections(): void
+    {
+        $this->actingAs($this->user)->get(route('data-room.index', ['company' => $this->company->id]));
+
+        $this->actingAs($this->user)
+            ->post(route('data-room.sections.store', ['company' => $this->company->id]), [
+                'name' => 'Board Docs',
+                'icon' => '📋',
+            ])
+            ->assertRedirect();
+
+        $sectionId = DB::table('data_room_sections')->where('name', 'Board Docs')->value('id');
+        $subsectionId = DB::table('data_room_subsections')->where('data_room_section_id', $sectionId)->value('id');
+
+        $this->actingAs($this->user)
+            ->patch(route('data-room.subsections.update', ['company' => $this->company->id, 'subsection' => $subsectionId]), [
+                'name' => 'Board Packs',
+                'icon' => '📝',
+            ])
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('data_room_subsections', [
+            'id' => $subsectionId,
+            'name' => 'Board Packs',
+            'icon' => '📝',
+        ]);
+    }
+
     protected function configureDatabase(): void
     {
         if (extension_loaded('pdo_sqlite')) {
@@ -297,6 +377,8 @@ class DataRoomDocumentTest extends TestCase
         }
 
         Schema::dropIfExists('documents');
+        Schema::dropIfExists('data_room_subsections');
+        Schema::dropIfExists('data_room_sections');
         Schema::dropIfExists('user_company_assignments');
         Schema::dropIfExists('model_has_permissions');
         Schema::dropIfExists('model_has_roles');
@@ -363,9 +445,28 @@ class DataRoomDocumentTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('data_room_sections', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('portfolio_company_id');
+            $table->string('name');
+            $table->string('icon', 32)->default('📁');
+            $table->unsignedInteger('sort_order')->default(0);
+            $table->timestamps();
+        });
+
+        Schema::create('data_room_subsections', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('data_room_section_id');
+            $table->string('name');
+            $table->string('icon', 32)->default('📄');
+            $table->unsignedInteger('sort_order')->default(0);
+            $table->timestamps();
+        });
+
         Schema::create('documents', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('portfolio_company_id');
+            $table->unsignedBigInteger('data_room_subsection_id')->nullable();
             $table->string('name');
             $table->string('path', 512);
             $table->string('mime_type', 100)->nullable();
@@ -407,7 +508,7 @@ class DataRoomDocumentTest extends TestCase
     }
 
     /**
-     * @param  array{name:string,path:string,mime_type:string,contents:string}  $file
+     * @param  array{name:string,path:string,mime_type:string,contents:string,category?:string}  $file
      */
     private function storeDocument(array $file): int
     {
@@ -418,7 +519,7 @@ class DataRoomDocumentTest extends TestCase
             'name' => $file['name'],
             'path' => $file['path'],
             'mime_type' => $file['mime_type'],
-            'category' => 'other',
+            'category' => $file['category'] ?? 'other',
             'uploaded_by' => $this->user->id,
             'created_at' => now(),
             'updated_at' => now(),

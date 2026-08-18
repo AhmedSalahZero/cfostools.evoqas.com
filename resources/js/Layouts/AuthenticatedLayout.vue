@@ -15,6 +15,7 @@ const showingNavigationDropdown = ref(false)
 // ─────────────────────────────────────────────────────
 const taskBadge = ref(0)
 const contractAlertCount = computed(() => page.props.contractAlerts?.count ?? 0)
+const myTaskAlertCount = computed(() => page.props.myTaskAlerts?.count ?? 0)
 
 // ─────────────────────────────────────────────────────
 // DARK MODE TOGGLE
@@ -174,13 +175,28 @@ function toggleDarkMode() {
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                         d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
                                 </svg>
-                                My Tasks
+                                To Do List
                                 <!-- Red badge for overdue/due-today count — shown when > 0 -->
                                 <span
                                     v-if="taskBadge > 0"
                                     class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold w-4 h-4 flex items-center justify-center rounded-full"
                                 >
                                     {{ taskBadge > 9 ? '9+' : taskBadge }}
+                                </span>
+                            </Link>
+                            <Link
+                                href="/my-tasks"
+                                class="relative flex items-center gap-1.5 text-m font-bold text-mp-teal hover:text-white transition-colors px-3 py-1.5 rounded-lg hover:bg-gray-800 mr-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M7 8h10M7 12h6m-6 4h8M5 3h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z" />
+                                </svg>
+                                My Tasks
+                                <span
+                                    v-if="myTaskAlertCount > 0"
+                                    class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold min-w-[1rem] h-4 flex items-center justify-center rounded-full px-0.5"
+                                >
+                                    {{ myTaskAlertCount > 9 ? '9+' : myTaskAlertCount }}
                                 </span>
                             </Link>
 
@@ -271,6 +287,12 @@ function toggleDarkMode() {
                             href="/users"
                             :active="route().current('users.*')">
                             Users
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink href="/tasks" :active="route().current('tasks.*')">
+                            To Do List
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink href="/my-tasks" :active="route().current('my-tasks.*')">
+                            My Tasks
                         </ResponsiveNavLink>
                     </div>
 

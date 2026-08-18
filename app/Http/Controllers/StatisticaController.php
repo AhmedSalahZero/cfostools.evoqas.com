@@ -614,6 +614,19 @@ class StatisticaController extends Controller
         if ((int) $user->organization_id !== (int) $orgId) {
             abort(403);
         }
+
+        if ($user->hasRole('admin')) {
+            return;
+        }
+
+        $hasStatisticaAccess = DB::table('user_company_permissions as ucp')
+            ->join('portfolio_companies as pc', 'pc.id', '=', 'ucp.portfolio_company_id')
+            ->where('ucp.user_id', $user->id)
+            ->where('ucp.permission', 'statistica')
+            ->where('pc.organization_id', (int) $orgId)
+            ->exists();
+
+        abort_unless($hasStatisticaAccess, 403);
     }
 
     private function authorizeWrite($orgId): void

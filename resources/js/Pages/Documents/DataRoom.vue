@@ -83,61 +83,92 @@
 
             <!-- Sidebar header -->
             <div class="px-4 py-3 border-b border-mp-border">
-              <p class="text-xs font-semibold text-white uppercase tracking-widest">Sections</p>
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs font-semibold text-white uppercase tracking-widest">Sections</p>
+                <button @click="openCreateSection"
+                  class="w-6 h-6 rounded-md bg-mp-card-hover hover:bg-mp-teal/20 text-white text-sm">
+                  +
+                </button>
+              </div>
             </div>
 
             <!-- All Documents shortcut -->
-            <button @click="activeSection = 'all'"
+            <button @click="selectSection('all')"
               :class="[
                 'w-full flex items-center justify-between px-4 py-3 text-sm transition-colors border-b border-mp-border/50',
-                activeSection === 'all'
+                activeSectionId === 'all'
                   ? 'bg-mp-teal/15 text-white font-semibold'
                   : 'text-white hover:bg-mp-card-hover hover:text-white'
               ]">
               <div class="flex items-center gap-3">
                 <span class="w-7 h-7 rounded-lg flex items-center justify-center text-base"
-                  :class="activeSection === 'all' ? 'bg-mp-teal/30' : 'bg-mp-card-hover'">
+                  :class="activeSectionId === 'all' ? 'bg-mp-teal/30' : 'bg-mp-card-hover'">
                   📂
                 </span>
                 <span>All Documents</span>
               </div>
               <span :class="[
                 'text-xs font-bold px-2 py-0.5 rounded-full',
-                activeSection === 'all' ? 'bg-mp-teal text-white' : 'bg-mp-card-hover text-white'
+                activeSectionId === 'all' ? 'bg-mp-teal text-white' : 'bg-mp-card-hover text-white'
               ]">{{ documents.length }}</span>
             </button>
 
             <!-- Section list -->
-            <template v-for="(label, key) in sections" :key="key">
-              <button @click="activeSection = key"
-                :class="[
-                  'w-full flex items-center justify-between px-4 py-3 text-sm transition-colors',
-                  activeSection === key
-                    ? 'bg-mp-teal/15 text-white font-semibold'
-                    : 'text-white hover:bg-mp-card-hover hover:text-white'
-                ]">
-                <div class="flex items-center gap-3">
-                  <span class="w-7 h-7 rounded-lg flex items-center justify-center text-base"
-                    :class="activeSection === key ? sectionIconActiveBg(key) : 'bg-mp-card-hover'">
-                    {{ sectionIcon(key) }}
-                  </span>
-                  <span>{{ label }}</span>
+            <template v-for="section in sectionsList" :key="section.id">
+              <div class="border-b border-mp-border/40">
+                <button @click="selectSection(section.id)"
+                  :class="[
+                    'w-full flex items-center justify-between px-4 py-3 text-sm transition-colors',
+                    activeSectionId === section.id && activeSubsectionId === 'all'
+                      ? 'bg-mp-teal/15 text-white font-semibold'
+                      : 'text-white hover:bg-mp-card-hover hover:text-white'
+                  ]">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-7 h-7 rounded-lg flex items-center justify-center text-base"
+                      :class="activeSectionId === section.id ? sectionIconActiveBg() : 'bg-mp-card-hover'">
+                      {{ sectionIcon(section) }}
+                    </span>
+                    <span class="truncate">{{ section.name }}</span>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-mp-card-hover text-white">{{ section.count ?? 0 }}</span>
+                    <button @click.stop="openEditSection(section)" class="w-6 h-6 rounded-md bg-mp-card-hover hover:bg-mp-warning/20 text-white text-xs">✎</button>
+                    <button @click.stop="openCreateSubsection(section)" class="w-6 h-6 rounded-md bg-mp-card-hover hover:bg-mp-teal/20 text-white text-xs">+</button>
+                    <button @click.stop="confirmDeleteStructure('section', section)" class="w-6 h-6 rounded-md bg-mp-card-hover hover:bg-mp-danger/20 text-white text-xs">×</button>
+                  </div>
+                </button>
+
+                <div class="pb-2">
+                  <button v-for="subsection in section.subsections" :key="subsection.id"
+                    @click="selectSubsection(section.id, subsection.id)"
+                    :class="[
+                      'w-full flex items-center justify-between pl-12 pr-4 py-2 text-xs transition-colors',
+                      activeSubsectionId === subsection.id
+                        ? 'bg-mp-teal/10 text-white font-semibold'
+                        : 'text-white/80 hover:bg-mp-card-hover hover:text-white'
+                    ]">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span>{{ subsection.icon }}</span>
+                      <span class="truncate">{{ subsection.name }}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-mp-card-hover text-white">{{ subsection.count ?? 0 }}</span>
+                      <button @click.stop="openEditSubsection(section, subsection)" class="w-5 h-5 rounded bg-mp-card-hover hover:bg-mp-warning/20 text-white text-[10px]">✎</button>
+                      <button @click.stop="confirmDeleteStructure('subsection', subsection)" class="w-5 h-5 rounded bg-mp-card-hover hover:bg-mp-danger/20 text-white text-[10px]">×</button>
+                    </div>
+                  </button>
                 </div>
-                <span :class="[
-                  'text-xs font-bold px-2 py-0.5 rounded-full',
-                  activeSection === key ? 'bg-mp-teal text-white' : 'bg-mp-card-hover text-white'
-                ]">{{ sectionCounts[key] ?? 0 }}</span>
-              </button>
+              </div>
             </template>
 
             <!-- Upload shortcut -->
             <div class="p-3 border-t border-mp-border mt-1">
-              <button @click="openUploadModal(activeSection !== 'all' ? activeSection : '')"
+              <button @click="openUploadModal()"
                 class="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-dashed border-mp-border hover:border-mp-teal text-white hover:text-white text-xs font-semibold transition-colors">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                 </svg>
-                Add to {{ activeSection === 'all' ? 'Data Room' : sections[activeSection] }}
+                Add to {{ activeSubsection ? activeSubsection.name : activeSection?.name ?? 'Data Room' }}
               </button>
             </div>
           </div>
@@ -149,10 +180,10 @@
           <!-- Section heading -->
           <div class="flex items-center justify-between mb-5">
             <div class="flex items-center gap-3">
-              <span class="text-2xl">{{ activeSection === 'all' ? '📂' : sectionIcon(activeSection) }}</span>
+              <span class="text-2xl">{{ activeSubsection ? activeSubsection.icon : activeSection ? activeSection.icon : '📂' }}</span>
               <div>
                 <h2 class="text-base font-bold text-white">
-                  {{ activeSection === 'all' ? 'All Documents' : sections[activeSection] }}
+                  {{ activeSubsection ? activeSubsection.name : activeSection ? activeSection.name : 'All Documents' }}
                 </h2>
                 <p class="text-xs text-white mt-0.5">
                   {{ filteredDocs.length }} document{{ filteredDocs.length !== 1 ? 's' : '' }}
@@ -174,15 +205,15 @@
           <div v-if="filteredDocs.length === 0"
             class="bg-mp-card border border-mp-border border-dashed rounded-xl p-16 text-center">
             <div class="w-16 h-16 bg-mp-card-hover rounded-xl flex items-center justify-center mx-auto mb-4 text-3xl">
-              {{ activeSection === 'all' ? '📂' : sectionIcon(activeSection) }}
+              {{ activeSubsection ? activeSubsection.icon : activeSection ? activeSection.icon : '📂' }}
             </div>
             <p class="text-white font-semibold mb-1">
               {{ searchQuery ? 'No documents match your search' : 'No documents here yet' }}
             </p>
             <p class="text-white text-sm mb-5">
-              {{ searchQuery ? 'Try a different keyword' : `Upload your first document to ${activeSection === 'all' ? 'the data room' : sections[activeSection]}` }}
+              {{ searchQuery ? 'Try a different keyword' : `Upload your first document to ${activeSubsection ? activeSubsection.name : activeSection ? activeSection.name : 'the data room'}` }}
             </p>
-            <button v-if="!searchQuery" @click="openUploadModal(activeSection !== 'all' ? activeSection : '')"
+            <button v-if="!searchQuery" @click="openUploadModal()"
               class="bg-mp-teal hover:bg-mp-teal-dark text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-colors inline-flex items-center gap-2">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -216,9 +247,12 @@
                   </div>
 
                   <!-- Section badge (only show in "All" view) -->
-                  <div v-if="activeSection === 'all'">
-                    <span :class="['text-xs font-semibold px-2.5 py-1 rounded-full', sectionBadgeClass(doc.category)]">
-                      {{ sectionIcon(doc.category) }} {{ sections[doc.category] ?? doc.category }}
+                  <div class="flex flex-wrap gap-2">
+                    <span :class="['text-xs font-semibold px-2.5 py-1 rounded-full', sectionBadgeClass()]">
+                      {{ doc.section_icon ?? '📁' }} {{ doc.section_name ?? 'Section' }}
+                    </span>
+                    <span :class="['text-xs font-semibold px-2.5 py-1 rounded-full', sectionBadgeClass()]">
+                      {{ doc.subsection_icon ?? '📄' }} {{ doc.subsection_name ?? 'Subsection' }}
                     </span>
                   </div>
 
@@ -326,7 +360,7 @@
               ]"
               @click="$refs.fileInput.click()">
               <input ref="fileInput" type="file" class="hidden"
-                accept=".xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp"
+                accept=".xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp,.zip,.rar"
                 @change="handleFileSelect"/>
 
               <div v-if="!uploadModal.file" class="space-y-2">
@@ -337,7 +371,7 @@
                   </svg>
                 </div>
                 <p class="text-white text-sm font-semibold">Drop file here or <span class="text-white">click to browse</span></p>
-                <p class="text-white text-xs">Excel · CSV · PDF · Word · PowerPoint · Images · Max 50 MB</p>
+                <p class="text-white text-xs">Excel · CSV · PDF · Word · PowerPoint · Images · ZIP · RAR · Max 50 MB</p>
               </div>
 
               <div v-else class="flex items-center gap-4 justify-center">
@@ -355,24 +389,34 @@
               </div>
             </div>
 
-            <!-- Section selector -->
+            <!-- Subsection selector -->
             <div>
               <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-1.5">
-                Section <span class="text-mp-danger">*</span>
+                Upload To <span class="text-mp-danger">*</span>
               </label>
-              <div class="grid grid-cols-2 gap-2">
-                <template v-for="(label, key) in sections" :key="key">
-                  <button @click="uploadModal.category = key" type="button"
-                    :class="[
-                      'flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all text-left',
-                      uploadModal.category === key
-                        ? 'border-mp-teal bg-mp-teal/15 text-white'
-                        : 'border-mp-border bg-mp-card-hover text-white hover:border-mp-border hover:text-white'
-                    ]">
-                    <span class="text-base flex-shrink-0">{{ sectionIcon(key) }}</span>
-                    <span class="text-xs leading-tight">{{ label }}</span>
-                  </button>
-                </template>
+              <div class="space-y-3 max-h-60 overflow-auto pr-1">
+                <div v-for="section in sectionsList" :key="section.id" class="bg-mp-card-hover rounded-lg border border-mp-border p-3">
+                  <div class="flex items-center gap-2 text-sm font-semibold text-white mb-2">
+                    <span>{{ section.icon }}</span>
+                    <span>{{ section.name }}</span>
+                  </div>
+                  <div class="grid grid-cols-1 gap-2">
+                    <button v-for="subsection in section.subsections" :key="subsection.id"
+                      @click="uploadModal.subsectionId = subsection.id" type="button"
+                      :class="[
+                        'flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all text-left',
+                        uploadModal.subsectionId === subsection.id
+                          ? 'border-mp-teal bg-mp-teal/15 text-white'
+                          : 'border-mp-border bg-mp-page text-white hover:border-mp-border hover:text-white'
+                      ]">
+                      <span class="flex items-center gap-2">
+                        <span>{{ subsection.icon }}</span>
+                        <span class="text-xs leading-tight">{{ subsection.name }}</span>
+                      </span>
+                      <span class="text-[10px] px-2 py-0.5 rounded-full bg-mp-card-hover">{{ subsection.count ?? 0 }}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -394,10 +438,10 @@
               Cancel
             </button>
             <button @click="submitUpload"
-              :disabled="!uploadModal.file || !uploadModal.category || uploadModal.loading"
+              :disabled="!uploadModal.file || !uploadModal.subsectionId || uploadModal.loading"
               :class="[
                 'flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors',
-                uploadModal.file && uploadModal.category && !uploadModal.loading
+                uploadModal.file && uploadModal.subsectionId && !uploadModal.loading
                   ? 'bg-mp-teal hover:bg-mp-teal-dark text-white'
                   : 'bg-mp-page text-white cursor-not-allowed'
               ]">
@@ -462,6 +506,75 @@
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
               </svg>
               {{ renameModal.loading ? 'Saving…' : 'Save Name' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="structureModal.show"
+        class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-mp-card rounded-2xl border border-mp-border shadow-2xl w-full max-w-lg">
+          <div class="flex items-center justify-between px-6 py-4 border-b border-mp-border">
+            <h2 class="text-white font-bold text-base">
+              {{ structureModal.mode === 'create' ? `Add ${structureModal.type}` : `Edit ${structureModal.type}` }}
+            </h2>
+            <button @click="structureModal.show = false" class="text-white">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="p-6 space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-1.5">Name</label>
+              <input v-model="structureModal.name" type="text"
+                class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-mp-teal"/>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-1.5">Icon</label>
+              <div class="grid grid-cols-5 gap-2">
+                <button v-for="icon in iconOptions" :key="icon" type="button" @click="structureModal.icon = icon"
+                  :class="structureModal.icon === icon ? 'border-mp-teal bg-mp-teal/15' : 'border-mp-border bg-mp-card-hover'"
+                  class="h-11 rounded-lg border text-lg text-white transition-colors">
+                  {{ icon }}
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="flex gap-3 px-6 py-4 border-t border-mp-border">
+            <button @click="structureModal.show = false"
+              class="flex-1 px-4 py-2.5 rounded-lg bg-mp-card-hover hover:bg-mp-page text-white text-sm font-medium transition-colors">
+              Cancel
+            </button>
+            <button @click="saveStructure" :disabled="!structureModal.name.trim() || structureModal.loading"
+              class="flex-1 px-4 py-2.5 rounded-lg bg-mp-teal hover:bg-mp-teal-dark text-white text-sm font-semibold transition-colors disabled:opacity-60">
+              {{ structureModal.loading ? 'Saving…' : 'Save' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="structureDeleteModal.show"
+        class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-mp-card rounded-2xl border border-mp-border shadow-2xl w-full max-w-md">
+          <div class="p-6 text-center">
+            <h3 class="text-white font-bold text-lg mb-2">Delete {{ structureDeleteModal.type }}?</h3>
+            <p class="text-white text-sm mb-4">
+              {{ structureDeleteModal.name }} will be removed with all nested files.
+            </p>
+          </div>
+          <div class="flex gap-3 px-6 pb-6">
+            <button @click="structureDeleteModal.show = false"
+              class="flex-1 px-4 py-2.5 rounded-lg bg-mp-card-hover hover:bg-mp-page text-white text-sm font-medium transition-colors">
+              Cancel
+            </button>
+            <button @click="executeDeleteStructure" :disabled="structureDeleteModal.loading"
+              class="flex-1 px-4 py-2.5 rounded-lg bg-mp-danger hover:bg-mp-danger text-white text-sm font-semibold transition-colors disabled:opacity-60">
+              {{ structureDeleteModal.loading ? 'Deleting…' : 'Delete' }}
             </button>
           </div>
         </div>
@@ -724,27 +837,40 @@ import UniverSheetEditor from '@/Components/UniverSheetEditor.vue'
 const props = defineProps({
   company:       Object,
   documents:     Array,
-  sections:      Object,
-  sectionCounts: Object,
+  sections:      Array,
+  iconOptions:   Array,
   lastUpload:    String,
 })
 
 // ── State ──────────────────────────────────────────────────────────────────────
-const activeSection = ref('all')
-const searchQuery   = ref('')
-const fileInput     = ref(null)
+const activeSectionId = ref('all')
+const activeSubsectionId = ref('all')
+const searchQuery     = ref('')
+const fileInput       = ref(null)
+
+const sectionsList = computed(() => props.sections ?? [])
+const sectionMap = computed(() => new Map(sectionsList.value.map(section => [section.id, section])))
+const activeSection = computed(() => activeSectionId.value === 'all' ? null : sectionMap.value.get(activeSectionId.value) ?? null)
+const activeSubsection = computed(() => {
+  if (activeSectionId.value === 'all' || activeSubsectionId.value === 'all') return null
+  return activeSection.value?.subsections?.find(subsection => subsection.id === activeSubsectionId.value) ?? null
+})
 
 // ── Computed ───────────────────────────────────────────────────────────────────
 const filteredDocs = computed(() => {
   let docs = props.documents ?? []
-  if (activeSection.value !== 'all') {
-    docs = docs.filter(d => d.category === activeSection.value)
+  if (activeSectionId.value !== 'all') {
+    docs = docs.filter(d => d.section_id === activeSectionId.value)
+  }
+  if (activeSubsectionId.value !== 'all') {
+    docs = docs.filter(d => d.subsection_id === activeSubsectionId.value)
   }
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.toLowerCase()
     docs = docs.filter(d =>
       d.name.toLowerCase().includes(q) ||
-      (props.sections[d.category] ?? '').toLowerCase().includes(q) ||
+      (d.section_name ?? '').toLowerCase().includes(q) ||
+      (d.subsection_name ?? '').toLowerCase().includes(q) ||
       d.uploader.toLowerCase().includes(q)
     )
   }
@@ -752,7 +878,7 @@ const filteredDocs = computed(() => {
 })
 
 const sectionsWithFiles = computed(() => {
-  return Object.values(props.sectionCounts ?? {}).filter(c => c > 0).length
+  return sectionsList.value.filter(section => (section.count ?? 0) > 0).length
 })
 
 // ── Upload Modal ───────────────────────────────────────────────────────────────
@@ -761,18 +887,18 @@ const uploadModal = reactive({
   dragging: false,
   file:     null,
   fileMime: '',
-  category: '',
+  subsectionId: '',
   name:     '',
   loading:  false,
 })
 
-function openUploadModal(presetCategory = '') {
-  uploadModal.show     = true
-  uploadModal.category = presetCategory || ''
-  uploadModal.name     = ''
-  uploadModal.file     = null
-  uploadModal.fileMime = ''
-  uploadModal.loading  = false
+function openUploadModal(presetSubsectionId = '') {
+  uploadModal.show        = true
+  uploadModal.subsectionId = presetSubsectionId || inferDefaultSubsectionId()
+  uploadModal.name        = ''
+  uploadModal.file        = null
+  uploadModal.fileMime    = ''
+  uploadModal.loading     = false
 }
 
 function closeUploadModal() {
@@ -813,6 +939,8 @@ function guessMimeFromName(name) {
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ppt:  'application/vnd.ms-powerpoint',
     pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    zip:  'application/zip',
+    rar:  'application/vnd.rar',
     jpg:  'image/jpeg', jpeg: 'image/jpeg',
     png:  'image/png', gif: 'image/gif', webp: 'image/webp',
   }
@@ -820,15 +948,15 @@ function guessMimeFromName(name) {
 }
 
 function submitUpload() {
-  if (!uploadModal.file || !uploadModal.category || uploadModal.loading) return
+  if (!uploadModal.file || !uploadModal.subsectionId || uploadModal.loading) return
   uploadModal.loading = true
 
   router.post(
     `/portfolio-companies/${props.company.id}/data-room`,
     {
-      file:     uploadModal.file,
-      category: uploadModal.category,
-      name:     uploadModal.name || '',
+      file:          uploadModal.file,
+      subsection_id: uploadModal.subsectionId,
+      name:          uploadModal.name || '',
     },
     {
       forceFormData:  true,
@@ -846,6 +974,22 @@ function submitUpload() {
       },
     }
   )
+}
+
+function selectSection(sectionId) {
+  activeSectionId.value = sectionId
+  activeSubsectionId.value = 'all'
+}
+
+function selectSubsection(sectionId, subsectionId) {
+  activeSectionId.value = sectionId
+  activeSubsectionId.value = subsectionId
+}
+
+function inferDefaultSubsectionId() {
+  if (activeSubsectionId.value !== 'all') return activeSubsectionId.value
+  if (activeSection.value?.subsections?.length) return activeSection.value.subsections[0].id
+  return sectionsList.value[0]?.subsections?.[0]?.id ?? ''
 }
 
 // ── Rename Modal ───────────────────────────────────────────────────────────────
@@ -875,6 +1019,132 @@ function submitRename() {
       onFinish:  () => { renameModal.loading = false },
     }
   )
+}
+
+const structureModal = reactive({
+  show: false,
+  mode: 'create',
+  type: 'section',
+  targetId: null,
+  parentSectionId: null,
+  name: '',
+  icon: '📁',
+  loading: false,
+})
+
+function openCreateSection() {
+  structureModal.show = true
+  structureModal.mode = 'create'
+  structureModal.type = 'section'
+  structureModal.targetId = null
+  structureModal.parentSectionId = null
+  structureModal.name = ''
+  structureModal.icon = props.iconOptions?.[0] ?? '📁'
+  structureModal.loading = false
+}
+
+function openEditSection(section) {
+  structureModal.show = true
+  structureModal.mode = 'edit'
+  structureModal.type = 'section'
+  structureModal.targetId = section.id
+  structureModal.parentSectionId = null
+  structureModal.name = section.name
+  structureModal.icon = section.icon
+  structureModal.loading = false
+}
+
+function openCreateSubsection(section) {
+  structureModal.show = true
+  structureModal.mode = 'create'
+  structureModal.type = 'subsection'
+  structureModal.targetId = null
+  structureModal.parentSectionId = section.id
+  structureModal.name = ''
+  structureModal.icon = '📄'
+  structureModal.loading = false
+}
+
+function openEditSubsection(section, subsection) {
+  structureModal.show = true
+  structureModal.mode = 'edit'
+  structureModal.type = 'subsection'
+  structureModal.targetId = subsection.id
+  structureModal.parentSectionId = section.id
+  structureModal.name = subsection.name
+  structureModal.icon = subsection.icon
+  structureModal.loading = false
+}
+
+function saveStructure() {
+  if (!structureModal.name.trim() || structureModal.loading) return
+  structureModal.loading = true
+
+  const payload = {
+    name: structureModal.name.trim(),
+    icon: structureModal.icon,
+  }
+
+  const url = structureModal.type === 'section'
+    ? (structureModal.mode === 'create'
+      ? `/portfolio-companies/${props.company.id}/data-room/sections`
+      : `/portfolio-companies/${props.company.id}/data-room/sections/${structureModal.targetId}`)
+    : (structureModal.mode === 'create'
+      ? `/portfolio-companies/${props.company.id}/data-room/sections/${structureModal.parentSectionId}/subsections`
+      : `/portfolio-companies/${props.company.id}/data-room/subsections/${structureModal.targetId}`)
+
+  const options = {
+    preserveScroll: true,
+    onSuccess: () => { structureModal.show = false },
+    onFinish: () => { structureModal.loading = false },
+  }
+
+  if (structureModal.mode === 'create') {
+    router.post(url, payload, options)
+    return
+  }
+
+  router.patch(url, payload, options)
+}
+
+const structureDeleteModal = reactive({
+  show: false,
+  type: 'section',
+  targetId: null,
+  name: '',
+  loading: false,
+})
+
+function confirmDeleteStructure(type, item) {
+  structureDeleteModal.show = true
+  structureDeleteModal.type = type
+  structureDeleteModal.targetId = item.id
+  structureDeleteModal.name = item.name
+  structureDeleteModal.loading = false
+}
+
+function executeDeleteStructure() {
+  if (!structureDeleteModal.targetId || structureDeleteModal.loading) return
+  structureDeleteModal.loading = true
+
+  const url = structureDeleteModal.type === 'section'
+    ? `/portfolio-companies/${props.company.id}/data-room/sections/${structureDeleteModal.targetId}`
+    : `/portfolio-companies/${props.company.id}/data-room/subsections/${structureDeleteModal.targetId}`
+
+  router.delete(url, {
+    preserveScroll: true,
+    onSuccess: () => {
+      structureDeleteModal.show = false
+      if (structureDeleteModal.type === 'section' && activeSectionId.value === structureDeleteModal.targetId) {
+        activeSectionId.value = 'all'
+        activeSubsectionId.value = 'all'
+      }
+      if (structureDeleteModal.type === 'subsection' && activeSubsectionId.value === structureDeleteModal.targetId) {
+        activeSubsectionId.value = 'all'
+      }
+    },
+    onFinish: () => { structureDeleteModal.loading = false },
+  })
 }
 
 // ── View Modal ─────────────────────────────────────────────────────────────────
@@ -1236,40 +1506,16 @@ function executeDelete() {
 }
 
 // ── Display Helpers ────────────────────────────────────────────────────────────
-function sectionIcon(key) {
-  const map = {
-    due_diligence:       '🔍',
-    contracts_legal:     '📜',
-    financial_documents: '💰',
-    corporate_documents: '🏛️',
-    operational:         '⚙️',
-    other:               '📁',
-  }
-  return map[key] ?? '📄'
+function sectionIcon(item) {
+  return item?.icon ?? '📁'
 }
 
-function sectionIconActiveBg(key) {
-  const map = {
-    due_diligence:       'bg-mp-gold-dark/30',
-    contracts_legal:     'bg-mp-gold-dark/30',
-    financial_documents: 'bg-mp-success/30',
-    corporate_documents: 'bg-mp-teal/30',
-    operational:         'bg-mp-warning/30',
-    other:               'bg-mp-muted/30',
-  }
-  return map[key] ?? 'bg-mp-teal/30'
+function sectionIconActiveBg() {
+  return 'bg-mp-teal/30'
 }
 
-function sectionBadgeClass(key) {
-  const map = {
-    due_diligence:       'bg-mp-gold/50 text-white border border-mp-gold',
-    contracts_legal:     'bg-mp-gold/50 text-white border border-mp-gold',
-    financial_documents: 'bg-mp-success/50 text-mp-success border border-mp-success',
-    corporate_documents: 'bg-mp-teal-subtle/50 text-white border border-mp-teal',
-    operational:         'bg-mp-warning/50 text-mp-warning border border-mp-warning',
-    other:               'bg-mp-card-hover text-white border border-mp-border',
-  }
-  return map[key] ?? 'bg-mp-card-hover text-white'
+function sectionBadgeClass() {
+  return 'bg-mp-card-hover text-white border border-mp-border'
 }
 
 function fileIconEmoji(mime) {
@@ -1279,6 +1525,7 @@ function fileIconEmoji(mime) {
   if (mime.includes('word') || mime.includes('document')) return '📘'
   if (mime.includes('presentation') || mime.includes('powerpoint')) return '📙'
   if (mime.includes('image'))      return '🖼️'
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('compressed') || mime.includes('octet-stream')) return '🗜️'
   return '📄'
 }
 
@@ -1289,6 +1536,7 @@ function fileIconBg(mime) {
   if (mime.includes('word') || mime.includes('document')) return 'bg-mp-teal-subtle/40'
   if (mime.includes('presentation') || mime.includes('powerpoint')) return 'bg-mp-warning/40'
   if (mime.includes('image'))      return 'bg-mp-gold/40'
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('compressed') || mime.includes('octet-stream')) return 'bg-mp-muted/40'
   return 'bg-mp-card-hover'
 }
 
@@ -1299,6 +1547,7 @@ function fileTypeBanner(mime) {
   if (mime.includes('word') || mime.includes('document')) return 'bg-mp-teal'
   if (mime.includes('presentation') || mime.includes('powerpoint')) return 'bg-mp-warning'
   if (mime.includes('image'))      return 'bg-mp-gold'
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('compressed') || mime.includes('octet-stream')) return 'bg-mp-muted'
   return 'bg-mp-muted'
 }
 
@@ -1313,6 +1562,7 @@ function fileTypeLabel(mime) {
   if (mime.includes('presentationml'))      return 'PowerPoint'
   if (mime.includes('powerpoint'))          return 'PowerPoint'
   if (mime.includes('image'))               return 'Image'
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('compressed') || mime.includes('octet-stream')) return 'Archive'
   return 'File'
 }
 
