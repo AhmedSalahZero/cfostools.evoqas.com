@@ -110,44 +110,62 @@ class DocumentController extends Controller
         $this->ensureStructure((int) $companyId);
 
         $request->validate([
-            'file'          => ['required', 'file', 'max:51200'],
+            'files'         => ['nullable', 'array', 'min:1'],
+            'files.*'       => ['file', 'max:51200'],
+            'file'          => ['nullable', 'file', 'max:51200'],
             'subsection_id' => ['required', 'integer'],
             'name'          => ['nullable', 'string', 'max:255'],
         ]);
 
-        $file = $request->file('file');
-        $mime = $file->getMimeType();
-
-        if ($mime === 'application/octet-stream' && !in_array($file->getClientOriginalExtension(), ['zip', 'rar'], true)) {
-            return back()->with('error', 'File type not allowed. Supported: Excel, CSV, PDF, Word, PowerPoint, Images, ZIP, RAR.');
-        }
-
-        if (!in_array($mime, $this->allowedMimes)) {
-            return back()->with('error', 'File type not allowed. Supported: Excel, CSV, PDF, Word, PowerPoint, Images, ZIP, RAR.');
-        }
+        $files = $this->resolveUploadFiles($request);
+        abort_if($files->isEmpty(), 422, 'Please choose at least one file to upload.');
 
         $subsection = $this->resolveSubsection((int) $companyId, (int) $request->integer('subsection_id'));
+        $uploadedNames = [];
 
-        $path        = $file->store("data-room/{$companyId}", 'private');
-        $displayName = $this->filenameWithExtension(
-            $request->input('name') ?: $file->getClientOriginalName(),
-            $path,
-            $mime
-        );
+        DB::transaction(function () use ($files, $request, $companyId, $subsection, &$uploadedNames) {
+            $customName = trim((string) $request->input('name', ''));
+            $allowCustomName = $customName !== '' && $files->count() === 1;
 
-        DB::table('documents')->insert([
-            'portfolio_company_id' => $companyId,
-            'data_room_subsection_id' => $subsection->id,
-            'name'                 => $displayName,
-            'path'                 => $path,
-            'mime_type'            => $mime,
-            'category'             => $this->legacyCategoryForSection($subsection->section_name ?? ''),
-            'uploaded_by'          => auth()->id(),
-            'created_at'           => now(),
-            'updated_at'           => now(),
-        ]);
+            foreach ($files as $file) {
+                $mime = $file->getMimeType();
 
-        return back()->with('success', "'{$displayName}' uploaded successfully.");
+                if ($mime === 'application/octet-stream' && !in_array(strtolower((string) $file->getClientOriginalExtension()), ['zip', 'rar'], true)) {
+                    abort(422, 'File type not allowed. Supported: Excel, CSV, PDF, Word, PowerPoint, Images, ZIP, RAR.');
+                }
+
+                if (!in_array($mime, $this->allowedMimes, true)) {
+                    abort(422, 'File type not allowed. Supported: Excel, CSV, PDF, Word, PowerPoint, Images, ZIP, RAR.');
+                }
+
+                $path = $file->store("data-room/{$companyId}", 'private');
+                $displayName = $this->filenameWithExtension(
+                    $allowCustomName ? $customName : $file->getClientOriginalName(),
+                    $path,
+                    $mime
+                );
+
+                DB::table('documents')->insert([
+                    'portfolio_company_id' => $companyId,
+                    'data_room_subsection_id' => $subsection->id,
+                    'name' => $displayName,
+                    'path' => $path,
+                    'mime_type' => $mime,
+                    'category' => $this->legacyCategoryForSection($subsection->section_name ?? ''),
+                    'uploaded_by' => auth()->id(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+
+                $uploadedNames[] = $displayName;
+            }
+        });
+
+        if (count($uploadedNames) === 1) {
+            return back()->with('success', "'{$uploadedNames[0]}' uploaded successfully.");
+        }
+
+        return back()->with('success', count($uploadedNames) . ' documents uploaded successfully.');
     }
 
     public function rename(Request $request, $companyId, $documentId)
@@ -542,6 +560,21 @@ class DocumentController extends Controller
     private function resolveSection(int $companyId, int $sectionId): DataRoomSection
     {
         return DataRoomSection::where('portfolio_company_id', $companyId)->findOrFail($sectionId);
+    }
+
+    private function resolveUploadFiles(Request $request): Collection
+    {
+        $files = $request->file('files');
+
+        if (is_array($files) && count($files) > 0) {
+            return collect($files)->filter();
+        }
+
+        if ($request->hasFile('file')) {
+            return collect([$request->file('file')]);
+        }
+
+        return collect();
     }
 
     private function resolveSubsection(int $companyId, int $subsectionId): object

@@ -151,6 +151,300 @@ class ProjectTaskAssignmentTest extends TestCase
         ]);
     }
 
+    public function test_task_completion_at_100_percent_clears_my_tasks_alerts(): void
+    {
+        $this->actingAs($this->admin)
+            ->post("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks", [
+                'name' => 'Finish Me',
+                'description' => 'progress-driven completion',
+                'priority' => 'high',
+                'status' => 'in_progress',
+                'progress_pct' => 25,
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $taskId = (int) DB::table('project_tasks')->where('name', 'Finish Me')->value('id');
+
+        $this->actingAs($this->admin)
+            ->get('/tasks')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page->where('myTaskAlerts.count', 1));
+
+        $this->actingAs($this->admin)
+            ->put("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks/{$taskId}", [
+                'name' => 'Finish Me',
+                'description' => 'progress-driven completion',
+                'priority' => 'high',
+                'status' => 'in_progress',
+                'progress_pct' => 100,
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseHas('project_tasks', [
+            'id' => $taskId,
+            'status' => 'completed',
+            'progress_pct' => 100,
+        ]);
+
+        $this->assertDatabaseMissing('project_task_assignees', [
+            'project_task_id' => $taskId,
+            'user_id' => $this->admin->id,
+            'seen_at' => null,
+        ]);
+
+        $this->actingAs($this->admin)
+            ->get('/my-tasks')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Tasks/MyTasks')
+                ->where('tasks', [])
+                ->where('unseenCount', 0)
+            );
+
+        $this->actingAs($this->admin)
+            ->get('/tasks')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page->where('myTaskAlerts.count', 0));
+    }
+
+    public function test_logging_100_percent_progress_marks_task_completed(): void
+    {
+        $this->actingAs($this->admin)
+            ->post("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks", [
+                'name' => 'Logged Finish',
+                'description' => 'completion from log',
+                'priority' => 'medium',
+                'status' => 'in_progress',
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $taskId = (int) DB::table('project_tasks')->where('name', 'Logged Finish')->value('id');
+
+        $this->actingAs($this->admin)
+            ->post("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks/{$taskId}/logs", [
+                'log_date' => now()->toDateString(),
+                'hours' => 2,
+                'notes' => 'completed work',
+                'progress_pct' => 100,
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseHas('project_tasks', [
+            'id' => $taskId,
+            'status' => 'completed',
+            'progress_pct' => 100,
+        ]);
+
+        $this->assertDatabaseMissing('project_task_assignees', [
+            'project_task_id' => $taskId,
+            'user_id' => $this->admin->id,
+            'seen_at' => null,
+        ]);
+    }
+
+    public function test_log_time_accepts_browser_string_values_and_updates_task(): void
+    {
+        $this->actingAs($this->admin)
+            ->post("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks", [
+                'name' => 'Log Strings',
+                'description' => 'browser payload',
+                'priority' => 'medium',
+                'status' => 'in_progress',
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $taskId = (int) DB::table('project_tasks')->where('name', 'Log Strings')->value('id');
+
+        $this->actingAs($this->admin)
+            ->postJson("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks/{$taskId}/logs", [
+                'log_date' => now()->toDateString(),
+                'hours' => '2',
+                'notes' => 'worked on review',
+                'progress_pct' => '80',
+            ])
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseHas('project_task_logs', [
+            'project_task_id' => $taskId,
+            'user_id' => $this->admin->id,
+            'hours' => 2,
+            'progress_pct' => 80,
+        ]);
+        $this->assertDatabaseHas('project_tasks', [
+            'id' => $taskId,
+            'status' => 'in_progress',
+            'progress_pct' => 80,
+        ]);
+    }
+
+    public function test_log_time_rejects_invalid_hours_without_creating_a_log(): void
+    {
+        $this->actingAs($this->admin)
+            ->post("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks", [
+                'name' => 'Invalid Hours',
+                'description' => 'must not log',
+                'priority' => 'low',
+                'status' => 'not_started',
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $taskId = (int) DB::table('project_tasks')->where('name', 'Invalid Hours')->value('id');
+
+        $this->actingAs($this->admin)
+            ->postJson("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks/{$taskId}/logs", [
+                'log_date' => now()->toDateString(),
+                'hours' => '0',
+                'notes' => 'too little time',
+                'progress_pct' => '20',
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['hours']);
+
+        $this->assertSame(0, DB::table('project_task_logs')->where('project_task_id', $taskId)->count());
+        $this->assertDatabaseHas('project_tasks', [
+            'id' => $taskId,
+            'status' => 'not_started',
+            'progress_pct' => 0,
+        ]);
+    }
+
+    public function test_marking_task_completed_hides_it_from_my_tasks(): void
+    {
+        $this->actingAs($this->admin)
+            ->post("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks", [
+                'name' => 'Mark Done',
+                'description' => 'status dropdown',
+                'priority' => 'medium',
+                'status' => 'in_progress',
+                'progress_pct' => 40,
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $taskId = (int) DB::table('project_tasks')->where('name', 'Mark Done')->value('id');
+
+        $this->actingAs($this->admin)
+            ->putJson("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks/{$taskId}", [
+                'name' => 'Mark Done',
+                'description' => 'status dropdown',
+                'priority' => 'medium',
+                'status' => 'completed',
+                'progress_pct' => 40,
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $this->assertDatabaseHas('project_tasks', [
+            'id' => $taskId,
+            'status' => 'completed',
+            'progress_pct' => 100,
+        ]);
+
+        $this->actingAs($this->admin)
+            ->get('/my-tasks')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Tasks/MyTasks')
+                ->where('tasks', [])
+                ->where('unseenCount', 0)
+            );
+
+        $this->actingAs($this->admin)
+            ->get('/tasks')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page->where('myTaskAlerts.count', 0));
+    }
+
+    public function test_progress_100_hides_from_my_tasks_even_if_client_sends_in_progress(): void
+    {
+        $this->actingAs($this->admin)
+            ->post("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks", [
+                'name' => 'Almost Done',
+                'description' => 'progress only',
+                'priority' => 'high',
+                'status' => 'in_progress',
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $taskId = (int) DB::table('project_tasks')->where('name', 'Almost Done')->value('id');
+
+        $this->actingAs($this->admin)
+            ->putJson("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks/{$taskId}", [
+                'name' => 'Almost Done',
+                'description' => 'progress only',
+                'priority' => 'high',
+                'status' => 'in_progress',
+                'progress_pct' => '100',
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseHas('project_tasks', [
+            'id' => $taskId,
+            'status' => 'completed',
+            'progress_pct' => 100,
+        ]);
+
+        $this->actingAs($this->admin)
+            ->get('/my-tasks')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Tasks/MyTasks')
+                ->where('tasks', [])
+            );
+    }
+
+    public function test_invalid_task_update_does_not_mark_task_completed(): void
+    {
+        $this->actingAs($this->admin)
+            ->post("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks", [
+                'name' => 'Stay Open',
+                'description' => 'invalid update',
+                'priority' => 'low',
+                'status' => 'in_progress',
+                'progress_pct' => 20,
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertOk();
+
+        $taskId = (int) DB::table('project_tasks')->where('name', 'Stay Open')->value('id');
+
+        $this->actingAs($this->admin)
+            ->putJson("/portfolio-companies/{$this->company->id}/projects/{$this->projectId}/tasks/{$taskId}", [
+                'name' => 'Stay Open',
+                'description' => 'invalid update',
+                'priority' => 'low',
+                'status' => 'completed',
+                'progress_pct' => 20,
+                'estimated_days' => 'not-a-number',
+                'assignee_ids' => [$this->admin->id],
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['estimated_days']);
+
+        $this->assertDatabaseHas('project_tasks', [
+            'id' => $taskId,
+            'status' => 'in_progress',
+            'progress_pct' => 20,
+        ]);
+
+        $this->actingAs($this->admin)
+            ->get('/my-tasks')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Tasks/MyTasks')
+                ->where('tasks.0.name', 'Stay Open')
+            );
+    }
+
     private function configureDatabase(): void
     {
         if (extension_loaded('pdo_sqlite')) {

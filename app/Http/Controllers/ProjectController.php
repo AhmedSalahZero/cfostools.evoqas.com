@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Inertia\Inertia;
 use App\Models\PortfolioCompany;
 
@@ -54,6 +55,92 @@ class ProjectController extends Controller
         }
 
         return $payload;
+    }
+
+    private function normalizeTaskState(?string $status, ?int $progressPct = null): array
+    {
+        $progress = max(0, min(100, (int) ($progressPct ?? 0)));
+        $taskStatus = $status ?? 'not_started';
+
+        if ($progress >= 100 || $taskStatus === 'completed') {
+            $taskStatus = 'completed';
+            $progress = 100;
+        }
+
+        return [
+            'status' => $taskStatus,
+            'progress_pct' => $progress,
+        ];
+    }
+
+    private function jsonValidationError(\Illuminate\Contracts\Validation\Validator $validator)
+    {
+        return response()->json([
+            'message' => $validator->errors()->first(),
+            'errors' => $validator->errors(),
+        ], 422);
+    }
+
+    private function validateTaskPayload(Request $request)
+    {
+        $input = $request->all();
+        foreach (['estimated_days', 'start_date', 'due_date', 'progress_pct', 'depends_on_task_id', 'description'] as $key) {
+            if (array_key_exists($key, $input) && $input[$key] === '') {
+                $input[$key] = null;
+            }
+        }
+        $request->merge($input);
+
+        $validator = Validator::make($request->all(), [
+            'name'               => 'required|string|max:255',
+            'description'        => 'nullable|string',
+            'priority'           => 'required|in:low,medium,high',
+            'status'             => 'required|in:not_started,in_progress,completed,blocked',
+            'estimated_days'     => 'nullable|numeric|min:1',
+            'start_date'         => 'nullable|date',
+            'due_date'           => 'nullable|date',
+            'progress_pct'       => 'nullable|numeric|min:0|max:100',
+            'depends_on_task_id' => 'nullable|exists:project_tasks,id',
+            'assignee_ids'       => 'nullable|array',
+            'assignee_ids.*'     => 'exists:users,id',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->jsonValidationError($validator);
+        }
+
+        $data = $validator->validated();
+        if (array_key_exists('progress_pct', $data) && $data['progress_pct'] !== null) {
+            $data['progress_pct'] = (int) round((float) $data['progress_pct']);
+        }
+        if (array_key_exists('estimated_days', $data) && $data['estimated_days'] !== null) {
+            $data['estimated_days'] = (int) round((float) $data['estimated_days']);
+        }
+
+        return $data;
+    }
+
+    private function syncCompletedAssignmentState(int $taskId, string $status): void
+    {
+        if (!Schema::hasColumn('project_task_assignees', 'seen_at')) {
+            return;
+        }
+
+        $query = DB::table('project_task_assignees')->where('project_task_id', $taskId);
+
+        if ($status === 'completed') {
+            $query->whereNull('seen_at')->update([
+                'seen_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            return;
+        }
+
+        $query->whereNotNull('seen_at')->update([
+            'seen_at' => null,
+            'updated_at' => now(),
+        ]);
     }
 
     /** Build full project data including tasks, assignees, logs, expenses */
@@ -320,18 +407,12 @@ class ProjectController extends Controller
     {
         $this->getCompany($company);
 
-        $data = $request->validate([
-            'name'               => 'required|string|max:255',
-            'description'        => 'nullable|string',
-            'priority'           => 'required|in:low,medium,high',
-            'status'             => 'required|in:not_started,in_progress,completed,blocked',
-            'estimated_days'     => 'nullable|integer|min:1',
-            'start_date'         => 'nullable|date',
-            'due_date'           => 'nullable|date',
-            'depends_on_task_id' => 'nullable|exists:project_tasks,id',
-            'assignee_ids'       => 'nullable|array',
-            'assignee_ids.*'     => 'exists:users,id',
-        ]);
+        $data = $this->validateTaskPayload($request);
+        if ($data instanceof \Illuminate\Http\JsonResponse) {
+            return $data;
+        }
+
+        $taskState = $this->normalizeTaskState($data['status'], $data['progress_pct'] ?? 0);
 
         // Get max order
         $maxOrder = DB::table('project_tasks')->where('project_id', $project)->max('order') ?? 0;
@@ -342,12 +423,12 @@ class ProjectController extends Controller
             'name'                => $data['name'],
             'description'         => $data['description'] ?? null,
             'priority'            => $data['priority'],
-            'status'              => $data['status'],
+            'status'              => $taskState['status'],
             'estimated_days'      => $data['estimated_days'] ?? null,
             'start_date'          => $data['start_date'] ?? null,
             'due_date'            => $data['due_date'] ?? null,
             'depends_on_task_id'  => $data['depends_on_task_id'] ?? null,
-            'progress_pct'        => 0,
+            'progress_pct'        => $taskState['progress_pct'],
             'order'               => $maxOrder + 1,
             'created_at'          => now(),
             'updated_at'          => now(),
@@ -357,6 +438,8 @@ class ProjectController extends Controller
         foreach (array_slice($data['assignee_ids'] ?? [], 0, 1) as $uid) {
             DB::table('project_task_assignees')->insertOrIgnore($this->assigneeInsertPayload($taskId, (int) $uid));
         }
+
+        $this->syncCompletedAssignmentState($taskId, $taskState['status']);
 
         return response()->json(['success' => true, 'id' => $taskId]);
     }
@@ -368,29 +451,22 @@ class ProjectController extends Controller
     {
         $this->getCompany($company);
 
-        $data = $request->validate([
-            'name'               => 'required|string|max:255',
-            'description'        => 'nullable|string',
-            'priority'           => 'required|in:low,medium,high',
-            'status'             => 'required|in:not_started,in_progress,completed,blocked',
-            'estimated_days'     => 'nullable|integer|min:1',
-            'start_date'         => 'nullable|date',
-            'due_date'           => 'nullable|date',
-            'progress_pct'       => 'nullable|integer|min:0|max:100',
-            'depends_on_task_id' => 'nullable|exists:project_tasks,id',
-            'assignee_ids'       => 'nullable|array',
-            'assignee_ids.*'     => 'exists:users,id',
-        ]);
+        $data = $this->validateTaskPayload($request);
+        if ($data instanceof \Illuminate\Http\JsonResponse) {
+            return $data;
+        }
+
+        $taskState = $this->normalizeTaskState($data['status'], $data['progress_pct'] ?? 0);
 
         DB::table('project_tasks')->where('id', $task)->update([
             'name'               => $data['name'],
             'description'        => $data['description'] ?? null,
             'priority'           => $data['priority'],
-            'status'             => $data['status'],
+            'status'             => $taskState['status'],
             'estimated_days'     => $data['estimated_days'] ?? null,
             'start_date'         => $data['start_date'] ?? null,
             'due_date'           => $data['due_date'] ?? null,
-            'progress_pct'       => $data['progress_pct'] ?? 0,
+            'progress_pct'       => $taskState['progress_pct'],
             'depends_on_task_id' => $data['depends_on_task_id'] ?? null,
             'updated_at'         => now(),
         ]);
@@ -400,6 +476,8 @@ class ProjectController extends Controller
         foreach (array_slice($data['assignee_ids'] ?? [], 0, 1) as $uid) {
             DB::table('project_task_assignees')->insertOrIgnore($this->assigneeInsertPayload($task, (int) $uid));
         }
+
+        $this->syncCompletedAssignmentState($task, $taskState['status']);
 
         return response()->json(['success' => true]);
     }
@@ -421,24 +499,51 @@ class ProjectController extends Controller
     {
         $this->getCompany($company);
 
-        $data = $request->validate([
+        $validator = Validator::make($request->all(), [
             'log_date'     => 'required|date',
             'hours'        => 'required|numeric|min:0.25|max:24',
             'notes'        => 'nullable|string',
-            'progress_pct' => 'nullable|integer|min:0|max:100',
+            'progress_pct' => 'nullable|numeric|min:0|max:100',
         ]);
 
-        $id = DB::table('project_task_logs')->insertGetId(array_merge($data, [
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => $validator->errors()->first(),
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $data = $validator->validated();
+        $hours = round((float) $data['hours'], 2);
+        $progressPct = array_key_exists('progress_pct', $data) && $data['progress_pct'] !== null
+            ? (int) round((float) $data['progress_pct'])
+            : null;
+
+        $id = DB::table('project_task_logs')->insertGetId([
             'project_task_id' => $task,
             'user_id'         => Auth::id(),
+            'log_date'        => $data['log_date'],
+            'hours'           => $hours,
+            'notes'           => $data['notes'] ?? null,
+            'progress_pct'    => $progressPct,
             'created_at'      => now(),
             'updated_at'      => now(),
-        ]));
+        ]);
 
-        // Update task progress if provided
-        if (!empty($data['progress_pct'])) {
+        if ($progressPct !== null) {
+            $taskState = $this->normalizeTaskState(
+                DB::table('project_tasks')->where('id', $task)->value('status'),
+                $progressPct
+            );
+
             DB::table('project_tasks')->where('id', $task)
-                ->update(['progress_pct' => $data['progress_pct'], 'updated_at' => now()]);
+                ->update([
+                    'status' => $taskState['status'],
+                    'progress_pct' => $taskState['progress_pct'],
+                    'updated_at' => now(),
+                ]);
+
+            $this->syncCompletedAssignmentState($task, $taskState['status']);
         }
 
         return response()->json(['success' => true, 'id' => $id]);

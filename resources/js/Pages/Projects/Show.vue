@@ -371,6 +371,9 @@
             <button @click="closeTaskModal" class="text-white hover:text-white">✕</button>
           </div>
           <div class="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div v-if="taskError" class="bg-mp-danger/20 border border-mp-danger text-mp-danger text-sm rounded-lg px-3 py-2">
+              {{ taskError }}
+            </div>
             <div>
               <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-1.5">Task Name *</label>
               <input v-model="taskForm.name" type="text" placeholder="e.g. Review financial statements"
@@ -384,7 +387,7 @@
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-1.5">Status</label>
-                <select v-model="taskForm.status"
+                <select v-model="taskForm.status" @change="onTaskStatusChange"
                   class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-mp-teal">
                   <option value="not_started">Not Started</option>
                   <option value="in_progress">In Progress</option>
@@ -485,6 +488,9 @@
             <button @click="showLogModal = false" class="text-white hover:text-white">✕</button>
           </div>
           <div class="px-6 py-5 space-y-4">
+            <div v-if="logError" class="bg-mp-danger/20 border border-mp-danger text-mp-danger text-sm rounded-lg px-3 py-2">
+              {{ logError }}
+            </div>
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-1.5">Date *</label>
@@ -640,6 +646,7 @@ const expandedTasks = ref([])
 // ── Task Modal ──
 const showAddTaskModal = ref(false)
 const editingTask      = ref(null)
+const taskError        = ref('')
 const emptyTaskForm = () => ({
   name: '', description: '', status: 'not_started', priority: 'medium',
   estimated_days: '', start_date: '', due_date: '', progress_pct: 0,
@@ -647,8 +654,50 @@ const emptyTaskForm = () => ({
 })
 const taskForm = reactive(emptyTaskForm())
 
+function emptyToNull(value) {
+  if (value === '' || value === undefined) return null
+  return value
+}
+
+function buildTaskPayload() {
+  const progress = Number(taskForm.progress_pct ?? 0)
+  const completed = taskForm.status === 'completed' || progress >= 100
+
+  return {
+    name: taskForm.name.trim(),
+    description: taskForm.description || '',
+    status: completed ? 'completed' : taskForm.status,
+    priority: taskForm.priority,
+    estimated_days: emptyToNull(taskForm.estimated_days),
+    start_date: emptyToNull(taskForm.start_date),
+    due_date: emptyToNull(taskForm.due_date),
+    progress_pct: completed ? 100 : (Number.isFinite(progress) ? Math.min(100, Math.max(0, Math.round(progress))) : 0),
+    depends_on_task_id: emptyToNull(taskForm.depends_on_task_id),
+    assignee_ids: [...taskForm.assignee_ids],
+  }
+}
+
+function onTaskStatusChange() {
+  if (taskForm.status === 'completed') {
+    taskForm.progress_pct = 100
+  }
+}
+
+function buildLogPayload() {
+  const hours = Number(logForm.hours)
+  const progress = Number(logForm.progress_pct ?? 0)
+
+  return {
+    log_date: logForm.log_date,
+    hours,
+    notes: logForm.notes || '',
+    progress_pct: Number.isFinite(progress) ? Math.min(100, Math.max(0, Math.round(progress))) : 0,
+  }
+}
+
 function openEditTask(task) {
   editingTask.value = task
+  taskError.value = ''
   Object.assign(taskForm, {
     name:               task.name,
     description:        task.description || '',
@@ -665,6 +714,7 @@ function openEditTask(task) {
 function closeTaskModal() {
   showAddTaskModal.value = false
   editingTask.value = null
+  taskError.value = ''
   Object.assign(taskForm, emptyTaskForm())
 }
 function toggleAssignee(uid) {
@@ -679,10 +729,12 @@ function toggleAssignee(uid) {
 // ── Log Modal ──
 const showLogModal = ref(false)
 const loggingTask  = ref(null)
+const logError     = ref('')
 const logForm = reactive({ log_date: '', hours: '', notes: '', progress_pct: 0 })
 
 function openLogModal(task) {
   loggingTask.value = task
+  logError.value = ''
   Object.assign(logForm, {
     log_date: new Date().toISOString().split('T')[0],
     hours: '',
@@ -722,13 +774,23 @@ function toggleTask(id) {
 }
 
 // ── API Calls ──
+function getCsrfToken() {
+  const match = document.cookie.match(/XSRF-TOKEN=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : ''
+}
+
 function apiFetch(url, opts = {}) {
-  const token = document.cookie.split(';').find(c => c.trim().startsWith('XSRF-TOKEN='))
-  const xsrf  = token ? decodeURIComponent(token.trim().split('=')[1]) : ''
+  const { headers: extraHeaders, ...rest } = opts
   return fetch(url, {
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'X-XSRF-TOKEN': xsrf },
-    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-XSRF-TOKEN': getCsrfToken(),
+      ...extraHeaders,
+    },
+    ...rest,
   })
 }
 const base = `/portfolio-companies/${props.company.id}/projects/${props.project.id}`
@@ -740,14 +802,37 @@ async function refreshProject() {
 }
 
 async function saveTask() {
-  if (!taskForm.name.trim()) return
+  taskError.value = ''
+  if (!taskForm.name.trim()) {
+    taskError.value = 'Task name is required.'
+    return
+  }
+
   saving.value = true
-  const url = editingTask.value ? `${base}/tasks/${editingTask.value.id}` : `${base}/tasks`
-  const method = editingTask.value ? 'PUT' : 'POST'
-  await apiFetch(url, { method, body: JSON.stringify(taskForm) })
-  saving.value = false
-  closeTaskModal()
-  await refreshProject()
+  try {
+    const url = editingTask.value ? `${base}/tasks/${editingTask.value.id}` : `${base}/tasks`
+    const method = editingTask.value ? 'PUT' : 'POST'
+    const res = await apiFetch(url, { method, body: JSON.stringify(buildTaskPayload()) })
+
+    let data = {}
+    try {
+      data = await res.json()
+    } catch (_) {}
+
+    if (!res.ok) {
+      taskError.value = data.message
+        || Object.values(data.errors || {})[0]?.[0]
+        || 'Could not save this task. Please try again.'
+      return
+    }
+
+    closeTaskModal()
+    await refreshProject()
+  } catch (_) {
+    taskError.value = 'Could not save this task. Please try again.'
+  } finally {
+    saving.value = false
+  }
 }
 
 async function deleteTask(taskId) {
@@ -757,14 +842,49 @@ async function deleteTask(taskId) {
 }
 
 async function saveLog() {
-  if (!logForm.log_date || !logForm.hours) return
+  logError.value = ''
+  const hours = Number(logForm.hours)
+
+  if (!logForm.log_date) {
+    logError.value = 'Date is required.'
+    return
+  }
+
+  if (!Number.isFinite(hours) || hours < 0.25 || hours > 24) {
+    logError.value = 'Hours must be between 0.25 and 24.'
+    return
+  }
+
   saving.value = true
-  await apiFetch(`${base}/tasks/${loggingTask.value.id}/logs`, {
-    method: 'POST', body: JSON.stringify(logForm)
-  })
-  saving.value = false
-  showLogModal.value = false
-  await refreshProject()
+  try {
+    const res = await apiFetch(`${base}/tasks/${loggingTask.value.id}/logs`, {
+      method: 'POST',
+      body: JSON.stringify(buildLogPayload()),
+    })
+
+    let data = {}
+    try {
+      data = await res.json()
+    } catch (_) {}
+
+    if (!res.ok) {
+      logError.value = data.message
+        || Object.values(data.errors || {})[0]?.[0]
+        || 'Could not save this time log. Please try again.'
+      return
+    }
+
+    const taskId = loggingTask.value.id
+    showLogModal.value = false
+    await refreshProject()
+    if (!expandedTasks.value.includes(taskId)) {
+      expandedTasks.value.push(taskId)
+    }
+  } catch (_) {
+    logError.value = 'Could not save this time log. Please try again.'
+  } finally {
+    saving.value = false
+  }
 }
 
 async function deleteLog(taskId, logId) {

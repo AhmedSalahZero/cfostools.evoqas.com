@@ -317,6 +317,41 @@ class DataRoomDocumentTest extends TestCase
         ]);
     }
 
+    public function test_can_batch_upload_multiple_files_to_one_subsection(): void
+    {
+        $this->actingAs($this->user)->get(route('data-room.index', ['company' => $this->company->id]));
+        $subsectionId = DB::table('data_room_subsections')->value('id');
+
+        $zip = \Illuminate\Http\UploadedFile::fake()->create('bundle.zip', 10, 'application/zip');
+        $pdf = \Illuminate\Http\UploadedFile::fake()->create('memo.pdf', 12, 'application/pdf');
+        $image = \Illuminate\Http\UploadedFile::fake()->image('diagram.png');
+
+        $this->actingAs($this->user)
+            ->post(route('data-room.store', ['company' => $this->company->id]), [
+                'files' => [$zip, $pdf, $image],
+                'subsection_id' => $subsectionId,
+            ])
+            ->assertRedirect();
+
+        $this->assertSame(3, DB::table('documents')->where('portfolio_company_id', $this->company->id)->count());
+        $this->assertDatabaseHas('documents', [
+            'portfolio_company_id' => $this->company->id,
+            'data_room_subsection_id' => $subsectionId,
+            'name' => 'bundle.zip',
+        ]);
+        $this->assertDatabaseHas('documents', [
+            'portfolio_company_id' => $this->company->id,
+            'data_room_subsection_id' => $subsectionId,
+            'name' => 'memo.pdf',
+        ]);
+        $this->assertDatabaseHas('documents', [
+            'portfolio_company_id' => $this->company->id,
+            'data_room_subsection_id' => $subsectionId,
+            'name' => 'diagram.png',
+        ]);
+        $this->assertCount(3, Storage::disk('private')->allFiles("data-room/{$this->company->id}"));
+    }
+
     public function test_can_manage_sections_and_subsections(): void
     {
         $this->actingAs($this->user)->get(route('data-room.index', ['company' => $this->company->id]));

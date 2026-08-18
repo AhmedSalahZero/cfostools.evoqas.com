@@ -39,7 +39,10 @@ class HandleInertiaRequests extends Middleware
 
         if ($user && Schema::hasTable('project_task_assignees')) {
             $query = DB::table('project_task_assignees')
-                ->where('user_id', $user->id);
+                ->join('project_tasks', 'project_tasks.id', '=', 'project_task_assignees.project_task_id')
+                ->where('project_tasks.status', '!=', 'completed')
+                ->where('project_tasks.progress_pct', '<', 100)
+                ->where('project_task_assignees.user_id', $user->id);
 
             if (Schema::hasColumn('project_task_assignees', 'seen_at')) {
                 $query->whereNull('seen_at');

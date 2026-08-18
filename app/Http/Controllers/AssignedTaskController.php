@@ -19,6 +19,8 @@ class AssignedTaskController extends Controller
             ->join('projects as p', 'p.id', '=', 'pt.project_id')
             ->join('portfolio_companies as pc', 'pc.id', '=', 'p.portfolio_company_id')
             ->where('pta.user_id', $user->id)
+            ->where('pt.status', '!=', 'completed')
+            ->where('pt.progress_pct', '<', 100)
             ->select(
                 'pta.project_task_id',
                 'pt.id',
@@ -60,7 +62,10 @@ class AssignedTaskController extends Controller
 
         if ($hasSeenAt) {
             DB::table('project_task_assignees')
+                ->join('project_tasks as pt', 'pt.id', '=', 'project_task_assignees.project_task_id')
                 ->where('user_id', $user->id)
+                ->where('pt.status', '!=', 'completed')
+                ->where('pt.progress_pct', '<', 100)
                 ->whereNull('seen_at')
                 ->update(['seen_at' => now()]);
         }

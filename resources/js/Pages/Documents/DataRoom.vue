@@ -355,32 +355,46 @@
               :class="[
                 'border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer',
                 uploadModal.dragging   ? 'border-mp-teal bg-mp-teal-subtle/20 scale-[1.01]' :
-                uploadModal.file       ? 'border-mp-success bg-mp-success/10' :
+                uploadModal.files.length ? 'border-mp-success bg-mp-success/10' :
                                          'border-mp-border hover:border-mp-border'
               ]"
               @click="$refs.fileInput.click()">
-              <input ref="fileInput" type="file" class="hidden"
+              <input ref="fileInput" type="file" class="hidden" multiple
                 accept=".xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp,.zip,.rar"
                 @change="handleFileSelect"/>
 
-              <div v-if="!uploadModal.file" class="space-y-2">
+              <div v-if="!uploadModal.files.length" class="space-y-2">
                 <div class="w-12 h-12 bg-mp-card-hover rounded-xl flex items-center justify-center mx-auto">
                   <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                       d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
                   </svg>
                 </div>
-                <p class="text-white text-sm font-semibold">Drop file here or <span class="text-white">click to browse</span></p>
+                <p class="text-white text-sm font-semibold">Drop files here or <span class="text-white">click to browse</span></p>
                 <p class="text-white text-xs">Excel · CSV · PDF · Word · PowerPoint · Images · ZIP · RAR · Max 50 MB</p>
               </div>
 
-              <div v-else class="flex items-center gap-4 justify-center">
-                <span class="text-3xl">{{ fileIconEmoji(uploadModal.fileMime) }}</span>
-                <div class="text-left">
-                  <p class="text-white text-sm font-semibold">{{ uploadModal.file.name }}</p>
-                  <p class="text-white text-xs">{{ formatFileSize(uploadModal.file.size) }} · {{ fileTypeLabel(uploadModal.fileMime) }}</p>
+              <div v-else class="flex items-start gap-4 justify-center">
+                <span class="text-3xl">{{ uploadModal.files.length > 1 ? '🗂️' : fileIconEmoji(uploadModal.files[0].mime) }}</span>
+                <div class="text-left min-w-0">
+                  <p class="text-white text-sm font-semibold">
+                    {{ uploadModal.files.length === 1 ? uploadModal.files[0].file.name : `${uploadModal.files.length} files selected` }}
+                  </p>
+                  <p class="text-white text-xs">
+                    {{ uploadModal.files.length === 1
+                      ? `${formatFileSize(uploadModal.files[0].file.size)} · ${fileTypeLabel(uploadModal.files[0].mime)}`
+                      : `${formatTotalUploadSize(uploadModal.files)} total` }}
+                  </p>
+                  <div class="mt-2 max-h-24 overflow-auto space-y-1">
+                    <p v-for="entry in uploadModal.files.slice(0, 5)" :key="entry.key" class="text-white text-xs truncate">
+                      {{ entry.file.name }}
+                    </p>
+                    <p v-if="uploadModal.files.length > 5" class="text-white text-xs">
+                      +{{ uploadModal.files.length - 5 }} more
+                    </p>
+                  </div>
                 </div>
-                <button @click.stop="clearFile"
+                <button @click.stop="clearFiles"
                   class="w-7 h-7 flex items-center justify-center rounded-lg bg-mp-card-hover hover:bg-mp-danger text-white hover:text-white transition-colors">
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -426,8 +440,9 @@
                 Document Name <span class="text-white font-normal normal-case">(optional)</span>
               </label>
               <input v-model="uploadModal.name" type="text"
+                :disabled="uploadModal.files.length > 1"
                 class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-mp-teal"
-                placeholder="Leave blank to use original filename"/>
+                :placeholder="uploadModal.files.length > 1 ? 'Available for single-file uploads only' : 'Leave blank to use original filename'"/>
             </div>
 
           </div>
@@ -438,10 +453,10 @@
               Cancel
             </button>
             <button @click="submitUpload"
-              :disabled="!uploadModal.file || !uploadModal.subsectionId || uploadModal.loading"
+              :disabled="!uploadModal.files.length || !uploadModal.subsectionId || uploadModal.loading"
               :class="[
                 'flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors',
-                uploadModal.file && uploadModal.subsectionId && !uploadModal.loading
+                uploadModal.files.length && uploadModal.subsectionId && !uploadModal.loading
                   ? 'bg-mp-teal hover:bg-mp-teal-dark text-white'
                   : 'bg-mp-page text-white cursor-not-allowed'
               ]">
@@ -885,8 +900,7 @@ const sectionsWithFiles = computed(() => {
 const uploadModal = reactive({
   show:     false,
   dragging: false,
-  file:     null,
-  fileMime: '',
+  files:    [],
   subsectionId: '',
   name:     '',
   loading:  false,
@@ -896,35 +910,40 @@ function openUploadModal(presetSubsectionId = '') {
   uploadModal.show        = true
   uploadModal.subsectionId = presetSubsectionId || inferDefaultSubsectionId()
   uploadModal.name        = ''
-  uploadModal.file        = null
-  uploadModal.fileMime    = ''
+  uploadModal.files       = []
   uploadModal.loading     = false
 }
 
 function closeUploadModal() {
   uploadModal.show = false
-  clearFile()
+  clearFiles()
 }
 
 function handleFileSelect(e) {
-  const file = e.target.files[0]
-  if (file) setFile(file)
+  const files = Array.from(e.target.files || [])
+  if (files.length) setFiles(files)
 }
 
 function handleDrop(e) {
   uploadModal.dragging = false
-  const file = e.dataTransfer.files[0]
-  if (file) setFile(file)
+  const files = Array.from(e.dataTransfer.files || [])
+  if (files.length) setFiles(files)
 }
 
-function setFile(file) {
-  uploadModal.file     = file
-  uploadModal.fileMime = file.type || guessMimeFromName(file.name)
+function setFiles(files) {
+  uploadModal.files = files.map((file, index) => ({
+    key: `${file.name}-${file.size}-${index}`,
+    file,
+    mime: file.type || guessMimeFromName(file.name),
+  }))
+
+  if (uploadModal.files.length > 1) {
+    uploadModal.name = ''
+  }
 }
 
-function clearFile() {
-  uploadModal.file     = null
-  uploadModal.fileMime = ''
+function clearFiles() {
+  uploadModal.files = []
   if (fileInput.value) fileInput.value.value = ''
 }
 
@@ -948,15 +967,15 @@ function guessMimeFromName(name) {
 }
 
 function submitUpload() {
-  if (!uploadModal.file || !uploadModal.subsectionId || uploadModal.loading) return
+  if (!uploadModal.files.length || !uploadModal.subsectionId || uploadModal.loading) return
   uploadModal.loading = true
 
   router.post(
     `/portfolio-companies/${props.company.id}/data-room`,
     {
-      file:          uploadModal.file,
+      files:         uploadModal.files.map(entry => entry.file),
       subsection_id: uploadModal.subsectionId,
-      name:          uploadModal.name || '',
+      name:          uploadModal.files.length === 1 ? uploadModal.name || '' : '',
     },
     {
       forceFormData:  true,
@@ -1576,6 +1595,10 @@ function formatFileSize(bytes) {
   if (bytes < 1024)       return bytes + ' B'
   if (bytes < 1048576)    return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / 1048576).toFixed(1) + ' MB'
+}
+
+function formatTotalUploadSize(files) {
+  return formatFileSize(files.reduce((total, entry) => total + (entry.file?.size ?? 0), 0))
 }
 </script>
 
