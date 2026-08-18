@@ -53,7 +53,7 @@
             <!-- Priority filter -->
             <div class="flex gap-1 bg-mp-card-hover rounded-lg p-1">
               <button v-for="f in priorityFilters" :key="f.value" @click="filterPriority = f.value"
-                :class="filterPriority === f.value ? 'bg-mp-muted text-white' : 'text-white hover:text-white'"
+                :class="priorityFilterClass(f.value)"
                 class="text-xs font-semibold px-3 py-1.5 rounded-md transition-colors">
                 {{ f.label }}
               </button>
@@ -405,6 +405,26 @@ const priorityFilters = [
   { label: '🟡 Medium', value: 'medium' },
   { label: '🟢 Low',   value: 'low' },
 ]
+
+function priorityFilterClass(value) {
+  if (filterPriority.value !== value) {
+    return 'text-white hover:text-white'
+  }
+
+  if (value === 'high') {
+    return 'bg-mp-danger text-white'
+  }
+
+  if (value === 'medium') {
+    return 'bg-mp-gold text-black'
+  }
+
+  if (value === 'low') {
+    return 'bg-mp-success text-black'
+  }
+
+  return 'bg-mp-muted text-black'
+}
 
 const filteredTasks = computed(() => {
   return tasks.value.filter(t => {
