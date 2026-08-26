@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use App\Models\Organization;
+use App\Models\PortfolioCompany;
 use App\Models\User;
+use App\Services\PortfolioCompanyPurger;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -154,12 +156,18 @@ class OrganizationController extends Controller
             ->with('flash', ['success' => $organization->name . ' has been updated successfully.']);
     }
 
-   public function destroy(Organization $organization)
+   public function destroy(Organization $organization, PortfolioCompanyPurger $purger)
 {
     // Delete logo file if exists
     if ($organization->logo) {
         Storage::disk('public')->delete($organization->logo);
     }
+
+    // Purge each company explicitly. The database would cascade the rows away
+    // on its own, but only the purger also removes their uploaded files.
+    PortfolioCompany::where('organization_id', $organization->id)
+        ->get()
+        ->each(fn (PortfolioCompany $company) => $purger->purge($company));
 
     // Delete all users belonging to this organization BEFORE deleting the org
     // This prevents them becoming orphaned with null organization_id

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use App\Support\LeadSources;
+use App\Services\PortfolioCompanyPurger;
 
 class PortfolioCompanyController extends Controller
 {
@@ -867,83 +868,15 @@ class PortfolioCompanyController extends Controller
             ->with('flash', ['success' => $company->name . ' has been updated successfully.']);
     }
 
-    public function destroy(PortfolioCompany $company)
+    public function destroy(PortfolioCompany $company, PortfolioCompanyPurger $purger)
     {
         $this->authorizeCompanyManage($company);
 
         $companyName = $company->name;
 
-        DB::transaction(function () use ($company) {
-        // ── 1. Sales data ──────────────────────────────────────────────────
-        $salesUploadIds = \App\Models\SalesUpload::where('portfolio_company_id', $company->id)->pluck('id');
-        \App\Models\SalesData::whereIn('upload_id', $salesUploadIds)->delete();
-        \App\Models\SalesUpload::whereIn('id', $salesUploadIds)->delete();
-        DB::table('sales_field_mappings')->where('portfolio_company_id', $company->id)->delete();
-        DB::table('sales_reports')->where('portfolio_company_id', $company->id)->delete();
-        DB::table('sales_dashboard_notes')->where('portfolio_company_id', $company->id)->delete();
-
-        // ── 2. Expense data ────────────────────────────────────────────────
-        $expenseUploadIds = \App\Models\ExpenseUpload::where('portfolio_company_id', $company->id)->pluck('id');
-        \App\Models\ExpenseData::whereIn('upload_id', $expenseUploadIds)->delete();
-        \App\Models\ExpenseUpload::whereIn('id', $expenseUploadIds)->delete();
-        DB::table('expense_dashboard_notes')->where('portfolio_company_id', $company->id)->delete();
-
-        // ── 3. Profitability ───────────────────────────────────────────────
-        DB::table('profitability_pl_mappings')->where('portfolio_company_id', $company->id)->delete();
-        DB::table('profitability_manual_inputs')->where('portfolio_company_id', $company->id)->delete();
-        DB::table('profitability_dashboard_notes')->where('portfolio_company_id', $company->id)->delete();
-
-        // ── 4. Financial Statements ────────────────────────────────────────
-        $statementIds = \App\Models\FinancialStatement::where('portfolio_company_id', $company->id)->pluck('id');
-        foreach ($statementIds as $stmtId) {
-            $sectionIds = DB::table('fs_sections')->where('financial_statement_id', $stmtId)->pluck('id');
-            DB::table('fs_line_items')->whereIn('fs_section_id', $sectionIds)->delete();
-            DB::table('fs_sections')->where('financial_statement_id', $stmtId)->delete();
-            DB::table('fs_ratios')->where('financial_statement_id', $stmtId)->delete();
-        }
-        \App\Models\FinancialStatement::whereIn('id', $statementIds)->delete();
-
-        // ── 5. Financial Planning Models (delete files from disk too) ──────
-        $planningModels = \App\Models\FinancialPlanningModel::where('portfolio_company_id', $company->id)->get();
-        foreach ($planningModels as $model) {
-            if ($model->file_path && Storage::disk('public')->exists($model->file_path)) {
-                Storage::disk('public')->delete($model->file_path);
-            }
-            $model->delete();
-        }
-
-        // ── 6. Budgets ─────────────────────────────────────────────────────
-        $budgetIds = DB::table('budget_statements')->where('portfolio_company_id', $company->id)->pluck('id');
-        foreach ($budgetIds as $budgetId) {
-            $sectionIds = DB::table('budget_sections')->where('budget_statement_id', $budgetId)->pluck('id');
-            foreach ($sectionIds as $secId) {
-                $groupIds = DB::table('budget_groups')->where('budget_section_id', $secId)->pluck('id');
-                foreach ($groupIds as $grpId) {
-                    $liIds = DB::table('budget_line_items')->where('budget_group_id', $grpId)->pluck('id');
-                    DB::table('budget_actuals')->whereIn('budget_line_item_id', $liIds)->delete();
-                    DB::table('budget_line_items')->whereIn('id', $liIds)->delete();
-                }
-                DB::table('budget_groups')->whereIn('id', $groupIds)->delete();
-            }
-            DB::table('budget_sections')->whereIn('id', $sectionIds)->delete();
-        }
-        DB::table('budget_statements')->whereIn('id', $budgetIds)->delete();
-
-        // ── 7. Cash Forecast ───────────────────────────────────────────────
-        DB::table('cash_forecast_entries')->where('portfolio_company_id', $company->id)->delete();
-
-        // ── 8. KPIs ────────────────────────────────────────────────────────
-        DB::table('kpi_trackings')->where('company_id', $company->id)->delete();
-
-        // ── 9. Contracts & services ────────────────────────────────────────
-        foreach ($company->contracts as $contract) {
-            $contract->services()->delete();
-            $contract->delete();
-        }
-
-        // ── 10. Delete the company itself ──────────────────────────────────
-        $company->delete();
-        });
+        // Removes the company, every company-scoped row (database cascades plus
+        // the tables those cascades miss) and every uploaded file on disk.
+        $purger->purge($company);
 
         return redirect()->route('portfolio-companies.index')
             ->with('flash', ['success' => "{$companyName} and all its data have been permanently deleted."]);
