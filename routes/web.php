@@ -367,6 +367,7 @@ Route::prefix('portfolio-companies/{company}/surveys')
         Route::post('/{survey}/copy',        [App\Http\Controllers\SurveyController::class, 'copy'])->name('copy');
         Route::post('/{survey}/save-to-bank', [App\Http\Controllers\SurveyController::class, 'saveToBank'])->name('save-to-bank');
         Route::get('/{survey}/results',      [App\Http\Controllers\SurveyController::class, 'results'])->name('results');
+        Route::get('/{survey}/export',       [App\Http\Controllers\SurveyController::class, 'exportResponses'])->name('export');
     });
 
 // Question Bank — org-level

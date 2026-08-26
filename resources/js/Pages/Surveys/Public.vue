@@ -67,6 +67,13 @@
       <!-- Questions -->
       <div class="space-y-5 mb-8">
         <template v-for="(q, qi) in questions" :key="q.id">
+          <!-- Section header -->
+          <div v-if="shouldShowSection(q, qi)" class="pt-2">
+            <h3 class="text-lg font-bold text-mp-gold border-b border-mp-gold/30 pb-2">
+              {{ sectionTitle(q.survey_section_id) }}
+            </h3>
+          </div>
+
           <div class="bg-mp-card border border-mp-border rounded-2xl p-6"
             :class="{ 'border-mp-danger/50': errors[q.id] }">
 
@@ -161,6 +168,34 @@
                 class="w-full bg-mp-card-hover border border-mp-border text-white rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-mp-gold placeholder-gray-600" />
             </div>
 
+            <!-- Matrix -->
+            <div v-else-if="q.question_type === 'matrix'" class="overflow-x-auto">
+              <table class="w-full min-w-[480px] text-sm">
+                <thead>
+                  <tr>
+                    <th class="text-left text-white/70 font-normal pb-3 pr-4"></th>
+                    <th v-for="opt in q.options" :key="opt.id"
+                      class="text-center text-white/80 font-medium pb-3 px-2 min-w-[80px]">
+                      {{ opt.option_text }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in q.matrix_rows" :key="row.id" class="border-t border-mp-border/50">
+                    <td class="py-3 pr-4 text-white align-middle">{{ row.row_text }}</td>
+                    <td v-for="opt in q.options" :key="opt.id" class="text-center py-3 px-2">
+                      <button type="button"
+                        @click="setMatrixAnswer(q.id, row.id, opt.id)"
+                        :class="matrixSelected(q.id, row.id, opt.id) ? 'bg-mp-gold border-mp-gold' : 'bg-mp-card-hover border-mp-border hover:border-mp-gold/50'"
+                        class="w-5 h-5 rounded-full border mx-auto transition-colors">
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="errors[q.id]" class="text-mp-danger text-xs mt-2">Please answer all required rows.</p>
+            </div>
+
           </div>
         </template>
       </div>
@@ -184,6 +219,7 @@ import { Head, router } from '@inertiajs/vue3'
 const props = defineProps({
   survey: Object,
   questions: Array,
+  sections: { type: Object, default: () => ({}) },
 })
 
 const nameLocked = !!props.survey.default_respondent_name
@@ -227,9 +263,43 @@ const toggleMulti = (qId, optId) => {
   answers[qId] = current
 }
 
+const sectionTitle = (sectionId) => {
+  if (!sectionId) return ''
+  const section = props.sections?.[sectionId] ?? props.sections?.[String(sectionId)]
+  return section?.title ?? ''
+}
+
+const shouldShowSection = (q, qi) => {
+  if (!q.survey_section_id) return false
+  const prev = props.questions[qi - 1]
+  return !prev || prev.survey_section_id !== q.survey_section_id
+}
+
+const ensureMatrixAnswers = (qId) => {
+  if (!answers[qId] || typeof answers[qId] !== 'object' || Array.isArray(answers[qId])) {
+    answers[qId] = {}
+  }
+  return answers[qId]
+}
+
+const setMatrixAnswer = (qId, rowId, optId) => {
+  ensureMatrixAnswers(qId)[rowId] = optId
+}
+
+const matrixSelected = (qId, rowId, optId) => {
+  const rowAnswers = answers[qId]
+  return rowAnswers && String(rowAnswers[rowId]) === String(optId)
+}
+
 const isAnswered = (q) => {
   const value = answers[q.id]
   if (q.question_type === 'mcq_multi') return Array.isArray(value) && value.length > 0
+  if (q.question_type === 'matrix') {
+    const rows = q.matrix_rows ?? []
+    if (!rows.length) return true
+    const rowAnswers = value && typeof value === 'object' ? value : {}
+    return rows.every(row => !!rowAnswers[row.id])
+  }
   return !!value
 }
 

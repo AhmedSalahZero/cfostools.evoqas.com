@@ -18,6 +18,11 @@
               <p v-if="survey.prepared_by" class="text-white text-xs mt-0.5">By {{ survey.prepared_by }}</p>
             </div>
             <div class="flex items-center gap-3">
+              <a v-if="demographics.total > 0"
+                :href="`/portfolio-companies/${company.id}/surveys/${survey.id}/export`"
+                class="flex items-center gap-2 bg-mp-gold-dark hover:bg-mp-gold text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                Export to Excel
+              </a>
               <span :class="statusBadge(survey.status)" class="text-xs font-semibold px-3 py-1.5 rounded-full uppercase">
                 {{ survey.status }}
               </span>
@@ -57,6 +62,12 @@
             <h2 class="text-sm text-white uppercase tracking-widest font-semibold">Question Analysis</h2>
 
             <template v-for="(q, qi) in questions" :key="q.id">
+              <div v-if="shouldShowSection(q, qi)" class="pt-2">
+                <h3 class="text-base font-bold text-mp-gold border-b border-mp-gold/30 pb-2">
+                  {{ sectionTitle(q.survey_section_id) }}
+                </h3>
+              </div>
+
               <div class="bg-mp-card border border-mp-border rounded-2xl p-6">
                 <div class="flex items-start gap-3 mb-4">
                   <span class="text-white text-sm font-mono mt-0.5">{{ qi + 1 }}.</span>
@@ -136,6 +147,26 @@
                     class="text-white hover:text-white text-xs font-medium transition-colors">
                     + Show {{ q.analytics.length - 5 }} more responses
                   </button>
+                </div>
+
+                <!-- Matrix -->
+                <div v-else-if="q.question_type === 'matrix'" class="space-y-5">
+                  <div v-if="!q.analytics?.length" class="text-white text-sm italic">No responses yet</div>
+                  <div v-for="row in q.analytics" :key="row.row_id" class="border-t border-mp-border/50 pt-4 first:border-0 first:pt-0">
+                    <p class="text-sm text-white font-medium mb-3">{{ row.row_text }}</p>
+                    <div v-if="!row.options?.length" class="text-white text-xs italic">No responses yet</div>
+                    <div v-else class="space-y-2">
+                      <div v-for="opt in row.options" :key="opt.label">
+                        <div class="flex items-center justify-between mb-1">
+                          <span class="text-sm text-white">{{ opt.label }}</span>
+                          <span class="text-sm font-semibold text-white">{{ opt.count }} <span class="text-white font-normal">({{ opt.pct }}%)</span></span>
+                        </div>
+                        <div class="h-2.5 bg-mp-card-hover rounded-full overflow-hidden">
+                          <div class="h-full bg-mp-gold rounded-full" :style="`width: ${opt.pct}%`"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
               </div>
@@ -221,14 +252,27 @@ import { ref, reactive } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 
-defineProps({
+const props = defineProps({
   company: Object,
   survey: Object,
   questions: Array,
+  sections: { type: Object, default: () => ({}) },
   demographics: Object,
 })
 
 const showAll = reactive({})
+
+const sectionTitle = (sectionId) => {
+  if (!sectionId) return ''
+  const section = props.sections?.[sectionId] ?? props.sections?.[String(sectionId)]
+  return section?.title ?? ''
+}
+
+const shouldShowSection = (q, qi) => {
+  if (!q.survey_section_id) return false
+  const prev = props.questions[qi - 1]
+  return !prev || prev.survey_section_id !== q.survey_section_id
+}
 
 const statusBadge = (s) => ({
   draft: 'bg-mp-page text-white',
@@ -236,7 +280,7 @@ const statusBadge = (s) => ({
   closed: 'bg-mp-danger/40 text-mp-danger border border-mp-danger/40',
 }[s] ?? 'bg-mp-page text-white')
 
-const typeLabel = (t) => ({ mcq: 'MCQ', mcq_multi: 'MCQ Multi', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown' }[t] ?? t)
+const typeLabel = (t) => ({ mcq: 'MCQ', mcq_multi: 'MCQ Multi', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown', matrix: 'Matrix' }[t] ?? t)
 const typeColor = (t) => ({
   mcq: 'bg-mp-teal-subtle/40 text-white',
   mcq_multi: 'bg-mp-teal-subtle/40 text-white',
@@ -245,6 +289,7 @@ const typeColor = (t) => ({
   short_text: 'bg-mp-gold/40 text-white',
   number: 'bg-mp-teal-subtle/40 text-white',
   dropdown: 'bg-mp-danger/40 text-mp-danger',
+  matrix: 'bg-mp-teal-subtle/40 text-white',
 }[t] ?? 'bg-mp-card-hover text-white')
 
 const genderLabel = (g) => ({ male: 'Male', female: 'Female', prefer_not_to_say: 'Prefer not to say' }[g] ?? g)

@@ -188,9 +188,11 @@ class SurveyCopyDeleteTest extends TestCase
         }
 
         Schema::dropIfExists('survey_answers');
+        Schema::dropIfExists('survey_matrix_rows');
         Schema::dropIfExists('survey_responses');
         Schema::dropIfExists('survey_question_options');
         Schema::dropIfExists('survey_questions');
+        Schema::dropIfExists('survey_sections');
         Schema::dropIfExists('surveys');
         Schema::dropIfExists('user_company_assignments');
         Schema::dropIfExists('model_has_permissions');
@@ -309,15 +311,32 @@ class SurveyCopyDeleteTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('survey_sections', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('survey_id');
+            $table->string('title');
+            $table->integer('sort_order')->default(0);
+            $table->timestamps();
+        });
+
         Schema::create('survey_questions', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('survey_id');
+            $table->unsignedBigInteger('survey_section_id')->nullable();
             $table->string('question_text');
             $table->string('question_type');
             $table->integer('sort_order')->default(0);
             $table->boolean('is_required')->default(false);
             $table->string('placeholder')->nullable();
             $table->integer('rating_max')->default(5);
+            $table->timestamps();
+        });
+
+        Schema::create('survey_matrix_rows', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('survey_question_id');
+            $table->string('row_text');
+            $table->integer('sort_order')->default(0);
             $table->timestamps();
         });
 

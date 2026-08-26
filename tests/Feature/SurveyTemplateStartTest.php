@@ -121,8 +121,8 @@ class SurveyTemplateStartTest extends TestCase
                 ->where('survey.introduction', 'Please rate us')
                 ->where('survey.default_respondent_company', 'Acme Holdings')
                 ->where('survey.is_template', false)
-                ->has('survey.questions', 1)
-                ->where('survey.questions.0.question_text', 'Would you recommend us?')
+                ->has('survey.items', 1)
+                ->where('survey.items.0.question_text', 'Would you recommend us?')
             );
     }
 
@@ -274,9 +274,11 @@ class SurveyTemplateStartTest extends TestCase
         Schema::dropIfExists('question_bank_items');
         Schema::dropIfExists('question_bank_sections');
         Schema::dropIfExists('survey_answers');
+        Schema::dropIfExists('survey_matrix_rows');
         Schema::dropIfExists('survey_responses');
         Schema::dropIfExists('survey_question_options');
         Schema::dropIfExists('survey_questions');
+        Schema::dropIfExists('survey_sections');
         Schema::dropIfExists('surveys');
         Schema::dropIfExists('user_company_assignments');
         Schema::dropIfExists('model_has_permissions');
@@ -395,15 +397,32 @@ class SurveyTemplateStartTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('survey_sections', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('survey_id');
+            $table->string('title');
+            $table->integer('sort_order')->default(0);
+            $table->timestamps();
+        });
+
         Schema::create('survey_questions', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('survey_id');
+            $table->unsignedBigInteger('survey_section_id')->nullable();
             $table->string('question_text');
             $table->string('question_type');
             $table->integer('sort_order')->default(0);
             $table->boolean('is_required')->default(false);
             $table->string('placeholder')->nullable();
             $table->integer('rating_max')->default(5);
+            $table->timestamps();
+        });
+
+        Schema::create('survey_matrix_rows', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('survey_question_id');
+            $table->string('row_text');
+            $table->integer('sort_order')->default(0);
             $table->timestamps();
         });
 

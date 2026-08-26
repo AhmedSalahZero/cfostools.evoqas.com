@@ -165,95 +165,145 @@
             </div>
           </div>
 
-          <!-- Questions -->
+          <!-- Questions & Sections -->
           <div class="space-y-4 mb-6">
-            <template v-for="(q, qi) in form.questions" :key="q._id">
-              <div class="bg-mp-card border rounded-2xl overflow-hidden transition-all"
-                :class="activeQuestion === qi ? 'border-mp-gold/60' : 'border-mp-border'">
+            <template v-for="(item, ii) in form.items" :key="item._id">
+
+              <!-- Section block -->
+              <div v-if="item.kind === 'section'"
+                class="bg-mp-card border border-mp-gold/40 rounded-2xl overflow-hidden">
+                <div class="flex items-center gap-3 px-5 py-3 bg-mp-gold/10 border-b border-mp-gold/30">
+                  <span class="text-xs font-semibold text-mp-gold uppercase tracking-widest">Section</span>
+                  <div class="flex-1"></div>
+                  <button @click="moveItem(ii, -1)" :disabled="ii === 0" class="text-white hover:text-white disabled:opacity-30 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+                  </button>
+                  <button @click="moveItem(ii, 1)" :disabled="ii === form.items.length - 1" class="text-white hover:text-white disabled:opacity-30 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                  </button>
+                  <button @click="removeItem(ii)" class="text-white hover:text-mp-danger transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                  </button>
+                </div>
+                <div class="p-5">
+                  <input v-model="item.title" type="text" placeholder="Section title (e.g. Financial Questions)"
+                    class="w-full bg-transparent border-0 border-b border-mp-border text-white text-lg font-semibold pb-2 focus:outline-none focus:border-mp-gold placeholder-gray-600 transition-colors" />
+                </div>
+              </div>
+
+              <!-- Question block -->
+              <div v-else class="bg-mp-card border rounded-2xl overflow-hidden transition-all"
+                :class="activeItem === ii ? 'border-mp-gold/60' : 'border-mp-border'">
 
                 <!-- Question header bar -->
                 <div class="flex items-center gap-3 px-5 py-3 bg-mp-card-hover/50 border-b border-mp-border">
-                  <span class="text-xs text-white font-mono w-5">{{ qi + 1 }}</span>
-                  <span :class="typeColor(q.question_type)" class="text-xs font-semibold px-2 py-0.5 rounded-md">
-                    {{ typeLabel(q.question_type) }}
+                  <span class="text-xs text-white font-mono w-5">{{ questionNumber(ii) }}</span>
+                  <span :class="typeColor(item.question_type)" class="text-xs font-semibold px-2 py-0.5 rounded-md">
+                    {{ typeLabel(item.question_type) }}
                   </span>
                   <div class="flex-1"></div>
                   <label class="flex items-center gap-1.5 text-xs text-white cursor-pointer">
-                    <input type="checkbox" v-model="q.is_required" class="accent-purple-500" />
+                    <input type="checkbox" v-model="item.is_required" class="accent-purple-500" />
                     Required
                   </label>
-                  <!-- Move up/down -->
-                  <button @click="moveQuestion(qi, -1)" :disabled="qi === 0" class="text-white hover:text-white disabled:opacity-30 transition-colors">
+                  <label v-if="hasSectionAbove(ii)" class="flex items-center gap-1.5 text-xs text-white cursor-pointer">
+                    <input type="checkbox" v-model="item._ungrouped" @change="recomputeSectionRefs" class="accent-purple-500" />
+                    Outside section
+                  </label>
+                  <button @click="moveItem(ii, -1)" :disabled="ii === 0" class="text-white hover:text-white disabled:opacity-30 transition-colors">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
                   </button>
-                  <button @click="moveQuestion(qi, 1)" :disabled="qi === form.questions.length - 1" class="text-white hover:text-white disabled:opacity-30 transition-colors">
+                  <button @click="moveItem(ii, 1)" :disabled="ii === form.items.length - 1" class="text-white hover:text-white disabled:opacity-30 transition-colors">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                   </button>
-                  <button @click="removeQuestion(qi)" class="text-white hover:text-mp-danger transition-colors">
+                  <button @click="removeItem(ii)" class="text-white hover:text-mp-danger transition-colors">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                   </button>
                 </div>
 
-                <div class="p-5" @click="activeQuestion = qi">
+                <div class="p-5" @click="activeItem = ii">
                   <!-- Question text -->
-                  <input v-model="q.question_text" type="text"
-                    :placeholder="typePlaceholder(q.question_type)"
+                  <input v-model="item.question_text" type="text"
+                    :placeholder="typePlaceholder(item.question_type)"
                     class="w-full bg-transparent border-0 border-b border-mp-border text-white text-base font-medium pb-2 mb-4 focus:outline-none focus:border-mp-gold placeholder-gray-600 transition-colors" />
 
                   <!-- Type-specific inputs -->
 
                   <!-- MCQ / Dropdown options -->
-                  <div v-if="['mcq', 'mcq_multi', 'dropdown'].includes(q.question_type)">
-                    <div v-for="(opt, oi) in q.options" :key="oi" class="flex items-center gap-2 mb-2">
+                  <div v-if="['mcq', 'mcq_multi', 'dropdown'].includes(item.question_type)">
+                    <div v-for="(opt, oi) in item.options" :key="oi" class="flex items-center gap-2 mb-2">
                       <div
-                        :class="q.question_type === 'mcq_multi' ? 'rounded-sm' : 'rounded-full'"
+                        :class="item.question_type === 'mcq_multi' ? 'rounded-sm' : 'rounded-full'"
                         class="w-4 h-4 border border-mp-border flex-shrink-0 flex items-center justify-center">
-                        <div v-if="q.question_type === 'mcq'" class="w-2 h-2 rounded-full bg-mp-muted"></div>
-                        <div v-else-if="q.question_type === 'mcq_multi'" class="w-2 h-2 rounded-sm bg-mp-muted"></div>
+                        <div v-if="item.question_type === 'mcq'" class="w-2 h-2 rounded-full bg-mp-muted"></div>
+                        <div v-else-if="item.question_type === 'mcq_multi'" class="w-2 h-2 rounded-sm bg-mp-muted"></div>
                         <div v-else class="w-2 h-0.5 bg-mp-muted"></div>
                       </div>
-                      <input v-model="q.options[oi]" type="text" :placeholder="`Option ${oi + 1}`"
+                      <input v-model="item.options[oi]" type="text" :placeholder="`Option ${oi + 1}`"
                         class="flex-1 bg-transparent border-b border-mp-border hover:border-mp-border text-white text-sm py-1 focus:outline-none focus:border-mp-gold placeholder-gray-700 transition-colors" />
-                      <button @click="q.options.splice(oi, 1)" class="text-white hover:text-mp-danger transition-colors text-xs">✕</button>
+                      <button @click="item.options.splice(oi, 1)" class="text-white hover:text-mp-danger transition-colors text-xs">✕</button>
                     </div>
-                    <button @click="q.options.push('')" class="text-white hover:text-white text-xs font-medium mt-1 transition-colors flex items-center gap-1">
+                    <button @click="item.options.push('')" class="text-white hover:text-white text-xs font-medium mt-1 transition-colors flex items-center gap-1">
                       <span>+</span> Add Option
                     </button>
                   </div>
 
+                  <!-- Matrix -->
+                  <div v-if="item.question_type === 'matrix'" class="space-y-4">
+                    <div>
+                      <p class="text-xs text-white uppercase tracking-widest font-semibold mb-2">Shared answer options (columns)</p>
+                      <div v-for="(opt, oi) in item.options" :key="oi" class="flex items-center gap-2 mb-2">
+                        <input v-model="item.options[oi]" type="text" :placeholder="`Column ${oi + 1}`"
+                          class="flex-1 bg-transparent border-b border-mp-border text-white text-sm py-1 focus:outline-none focus:border-mp-gold placeholder-gray-700" />
+                        <button @click="item.options.splice(oi, 1)" class="text-white hover:text-mp-danger text-xs">✕</button>
+                      </div>
+                      <button @click="item.options.push('')" class="text-white hover:text-white text-xs font-medium mt-1">+ Add Column</button>
+                    </div>
+                    <div>
+                      <p class="text-xs text-white uppercase tracking-widest font-semibold mb-2">Questions (rows)</p>
+                      <div v-for="(row, ri) in item.rows" :key="ri" class="flex items-center gap-2 mb-2">
+                        <span class="text-white text-xs w-5">{{ ri + 1 }}.</span>
+                        <input v-model="item.rows[ri]" type="text" :placeholder="`Row question ${ri + 1}`"
+                          class="flex-1 bg-transparent border-b border-mp-border text-white text-sm py-1 focus:outline-none focus:border-mp-gold placeholder-gray-700" />
+                        <button @click="item.rows.splice(ri, 1)" class="text-white hover:text-mp-danger text-xs">✕</button>
+                      </div>
+                      <button @click="item.rows.push('')" class="text-white hover:text-white text-xs font-medium mt-1">+ Add Row</button>
+                    </div>
+                  </div>
+
                   <!-- Yes / No preview -->
-                  <div v-if="q.question_type === 'yes_no'" class="flex gap-3">
+                  <div v-if="item.question_type === 'yes_no'" class="flex gap-3">
                     <div class="flex items-center gap-2 bg-mp-success/20 border border-mp-success/40 text-mp-success text-sm px-4 py-2 rounded-lg">✓ Yes</div>
                     <div class="flex items-center gap-2 bg-mp-danger/20 border border-mp-danger/40 text-mp-danger text-sm px-4 py-2 rounded-lg">✕ No</div>
                   </div>
 
                   <!-- Rating -->
-                  <div v-if="q.question_type === 'rating'" class="flex items-center gap-4">
+                  <div v-if="item.question_type === 'rating'" class="flex items-center gap-4">
                     <div class="flex gap-1">
-                      <template v-for="n in q.rating_max" :key="n">
+                      <template v-for="n in item.rating_max" :key="n">
                         <span class="w-8 h-8 bg-mp-card-hover border border-mp-border rounded-lg flex items-center justify-center text-white text-sm">{{ n }}</span>
                       </template>
                     </div>
                     <div class="flex items-center gap-2">
                       <span class="text-xs text-white">Max:</span>
-                      <select v-model="q.rating_max" class="bg-mp-card-hover border border-mp-border text-white text-xs rounded px-2 py-1 focus:outline-none">
+                      <select v-model="item.rating_max" class="bg-mp-card-hover border border-mp-border text-white text-xs rounded px-2 py-1 focus:outline-none">
                         <option v-for="n in [3,4,5,7,10]" :key="n" :value="n">{{ n }}</option>
                       </select>
                     </div>
                   </div>
 
                   <!-- Short text / Number preview -->
-                  <div v-if="['short_text', 'number'].includes(q.question_type)">
-                    <input type="text" v-model="q.placeholder" :placeholder="q.question_type === 'number' ? 'Hint text (e.g. Enter amount in USD)' : 'Hint text for respondents...'"
+                  <div v-if="['short_text', 'number'].includes(item.question_type)">
+                    <input type="text" v-model="item.placeholder" :placeholder="item.question_type === 'number' ? 'Hint text (e.g. Enter amount in USD)' : 'Hint text for respondents...'"
                       class="w-full bg-mp-card-hover/50 border border-dashed border-mp-border text-white text-sm rounded-lg px-4 py-2.5 focus:outline-none placeholder-gray-600" />
                   </div>
                 </div>
 
                 <!-- Save to bank option -->
-                <div class="px-5 pb-3 flex items-center gap-2">
-                  <input type="checkbox" :id="`bank-${qi}`" v-model="q._saveToBank" class="accent-purple-500" />
-                  <label :for="`bank-${qi}`" class="text-xs text-white cursor-pointer">Save to Question Bank</label>
-                  <select v-if="q._saveToBank" v-model="q._bankSection" class="ml-2 bg-mp-card-hover border border-mp-border text-xs text-white rounded px-2 py-1 focus:outline-none">
+                <div v-if="item.question_type !== 'matrix'" class="px-5 pb-3 flex items-center gap-2">
+                  <input type="checkbox" :id="`bank-${ii}`" v-model="item._saveToBank" class="accent-purple-500" />
+                  <label :for="`bank-${ii}`" class="text-xs text-white cursor-pointer">Save to Question Bank</label>
+                  <select v-if="item._saveToBank" v-model="item._bankSection" class="ml-2 bg-mp-card-hover border border-mp-border text-xs text-white rounded px-2 py-1 focus:outline-none">
                     <option :value="null">— No section —</option>
                     <option v-for="s in bankSections" :key="s.id" :value="s.id">{{ s.name }}</option>
                   </select>
@@ -262,17 +312,28 @@
             </template>
           </div>
 
-          <!-- Add question buttons -->
-          <div class="bg-mp-card border border-dashed border-mp-border rounded-2xl p-5">
-            <p class="text-xs text-white uppercase tracking-widest font-semibold mb-4 text-center">Add Question</p>
-            <div class="flex flex-wrap gap-2 justify-center">
-              <template v-for="type in questionTypes" :key="type.value">
-                <button @click="addQuestion(type.value)"
-                  :class="type.color"
-                  class="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg transition-colors border">
-                  {{ type.icon }} {{ type.label }}
+          <!-- Add section / question buttons -->
+          <div class="bg-mp-card border border-dashed border-mp-border rounded-2xl p-5 space-y-4">
+            <div>
+              <p class="text-xs text-white uppercase tracking-widest font-semibold mb-3 text-center">Add Section</p>
+              <div class="flex justify-center">
+                <button @click="addSection"
+                  class="flex items-center gap-1.5 text-xs font-medium px-4 py-2 rounded-lg transition-colors border bg-mp-gold/20 text-white border-mp-gold/50 hover:bg-mp-gold/30">
+                  § Section Title
                 </button>
-              </template>
+              </div>
+            </div>
+            <div>
+              <p class="text-xs text-white uppercase tracking-widest font-semibold mb-4 text-center">Add Question</p>
+              <div class="flex flex-wrap gap-2 justify-center">
+                <template v-for="type in questionTypes" :key="type.value">
+                  <button @click="addQuestion(type.value)"
+                    :class="type.color"
+                    class="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg transition-colors border">
+                    {{ type.icon }} {{ type.label }}
+                  </button>
+                </template>
+              </div>
             </div>
           </div>
         </div>
@@ -362,34 +423,76 @@ const questionTypes = [
   { value: 'short_text', label: 'Short Text',      icon: '¶',  color: 'bg-mp-gold/40 text-white border-mp-gold/50 hover:bg-mp-gold/60' },
   { value: 'number',     label: 'Number / Amount', icon: '#',  color: 'bg-mp-teal-subtle/40 text-white border-mp-teal/50 hover:bg-mp-teal-subtle/60' },
   { value: 'dropdown',   label: 'Dropdown',        icon: '▼',  color: 'bg-mp-danger/40 text-mp-danger border-mp-danger/50 hover:bg-mp-danger/60' },
+  { value: 'matrix',     label: 'Matrix / Likert', icon: '▦',  color: 'bg-mp-teal-subtle/40 text-white border-mp-teal/50 hover:bg-mp-teal-subtle/60' },
 ]
 
 const defaultOptions = (type) => {
   if (type === 'yes_no') return ['Yes', 'No']
+  if (type === 'matrix') return ['Strongly Agree', 'Agree', 'Disagree', 'Strongly Disagree']
   if (type === 'mcq' || type === 'mcq_multi' || type === 'dropdown') return ['', '', '']
   return []
 }
 
+const defaultRows = () => ['', '']
+
+const buildSection = (overrides = {}) => ({
+  _id: makeId(),
+  kind: 'section',
+  client_id: `section-${makeId()}`,
+  title: '',
+  ...overrides,
+})
+
 const buildQuestion = (type, overrides = {}) => ({
   _id: makeId(),
+  kind: 'question',
   question_text: '',
   question_type: type,
   is_required: false,
   rating_max: 5,
   placeholder: '',
   options: defaultOptions(type),
+  rows: type === 'matrix' ? defaultRows() : [],
+  section_ref: null,
   _saveToBank: false,
   _bankSection: null,
   ...overrides,
 })
 
-// Hydrate from existing survey
-const hydrateQuestions = () => {
-  if (!props.survey?.questions) return []
-  return props.survey.questions.map(q => buildQuestion(q.question_type, {
-    ...q,
-    options: q.options?.length ? q.options : defaultOptions(q.question_type),
-  }))
+const hydrateItems = () => {
+  if (props.survey?.items?.length) {
+    return props.survey.items.map(item => {
+      if (item.kind === 'section') {
+        return buildSection({
+          ...item,
+          client_id: item.client_id ?? `section-${item.id ?? makeId()}`,
+        })
+      }
+      return buildQuestion(item.question_type, {
+        ...item,
+        options: item.options?.length ? [...item.options] : defaultOptions(item.question_type),
+        rows: item.rows?.length ? [...item.rows] : (item.question_type === 'matrix' ? defaultRows() : []),
+      })
+    })
+  }
+  if (props.survey?.questions?.length) {
+    return props.survey.questions.map(q => buildQuestion(q.question_type, {
+      ...q,
+      options: q.options?.length ? q.options : defaultOptions(q.question_type),
+    }))
+  }
+  return []
+}
+
+const recomputeSectionRefs = () => {
+  let currentSectionClientId = null
+  for (const item of form.items) {
+    if (item.kind === 'section') {
+      currentSectionClientId = item.client_id
+    } else if (item.kind === 'question') {
+      item.section_ref = item._ungrouped ? null : currentSectionClientId
+    }
+  }
 }
 
 const form = reactive({
@@ -402,38 +505,60 @@ const form = reactive({
   show_respondent_age:        !!props.survey?.show_respondent_age,
   show_respondent_gender:     !!props.survey?.show_respondent_gender,
   is_template:  props.survey?.id ? !!props.survey?.is_template : false,
-  questions:    hydrateQuestions(),
+  items:        hydrateItems(),
 })
 
 const saving = ref(false)
 const showBankPanel = ref(false)
-const activeQuestion = ref(null)
+const activeItem = ref(null)
 const bankSearch = ref('')
 
-const addQuestion = (type) => {
-  form.questions.push(buildQuestion(type))
-  activeQuestion.value = form.questions.length - 1
+const questionNumber = (index) => {
+  let count = 0
+  for (let i = 0; i <= index; i++) {
+    if (form.items[i]?.kind === 'question') count++
+  }
+  return count
 }
 
-const removeQuestion = (i) => { form.questions.splice(i, 1) }
+const addSection = () => {
+  form.items.push(buildSection())
+}
 
-const moveQuestion = (i, dir) => {
+const addQuestion = (type) => {
+  form.items.push(buildQuestion(type))
+  recomputeSectionRefs()
+  activeItem.value = form.items.length - 1
+}
+
+const removeItem = (i) => { form.items.splice(i, 1); recomputeSectionRefs() }
+
+const moveItem = (i, dir) => {
   const j = i + dir
-  if (j < 0 || j >= form.questions.length) return
-  const tmp = form.questions[i]
-  form.questions[i] = form.questions[j]
-  form.questions[j] = tmp
+  if (j < 0 || j >= form.items.length) return
+  const tmp = form.items[i]
+  form.items[i] = form.items[j]
+  form.items[j] = tmp
+  recomputeSectionRefs()
 }
 
 const addFromBank = (item) => {
-  form.questions.push(buildQuestion(item.question_type, {
+  form.items.push(buildQuestion(item.question_type, {
     question_text: item.question_text,
     is_required:   item.is_required,
     rating_max:    item.rating_max,
     placeholder:   item.placeholder,
     options: item.options?.length ? [...item.options] : defaultOptions(item.question_type),
   }))
-  activeQuestion.value = form.questions.length - 1
+  recomputeSectionRefs()
+  activeItem.value = form.items.length - 1
+}
+
+const hasSectionAbove = (index) => {
+  for (let i = index - 1; i >= 0; i--) {
+    if (form.items[i]?.kind === 'section') return true
+  }
+  return false
 }
 
 const groupedBankItems = computed(() => {
@@ -452,7 +577,7 @@ const groupedBankItems = computed(() => {
   return [...map.values()].filter(s => s.items.length > 0)
 })
 
-const typeLabel = (t) => ({ mcq: 'MCQ', mcq_multi: 'MCQ Multi', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown' }[t] ?? t)
+const typeLabel = (t) => ({ mcq: 'MCQ', mcq_multi: 'MCQ Multi', yes_no: 'Yes/No', rating: 'Rating', short_text: 'Text', number: 'Number', dropdown: 'Dropdown', matrix: 'Matrix' }[t] ?? t)
 const typeColor = (t) => ({
   mcq: 'bg-mp-teal-subtle/40 text-white',
   mcq_multi: 'bg-mp-teal-subtle/40 text-white',
@@ -461,6 +586,7 @@ const typeColor = (t) => ({
   short_text: 'bg-mp-gold/40 text-white',
   number: 'bg-mp-teal-subtle/40 text-white',
   dropdown: 'bg-mp-danger/40 text-mp-danger',
+  matrix: 'bg-mp-teal-subtle/40 text-white',
 }[t] ?? 'bg-mp-card-hover text-white')
 
 const typePlaceholder = (t) => ({
@@ -471,10 +597,12 @@ const typePlaceholder = (t) => ({
   short_text: 'Type your open-ended question here...',
   number:     'Type your numeric question here...',
   dropdown:   'Type your dropdown question here...',
+  matrix:     'Matrix title or instructions (optional)...',
 }[t] ?? '')
 
 const saveSurvey = async () => {
   if (!form.title.trim()) { alert('Please enter a survey title.'); return }
+  recomputeSectionRefs()
   saving.value = true
 
   const payload = {
@@ -487,16 +615,30 @@ const saveSurvey = async () => {
     show_respondent_age:        form.show_respondent_age,
     show_respondent_gender:     form.show_respondent_gender,
     is_template:  form.is_template,
-    questions: form.questions.map(q => ({
-      question_text: q.question_text,
-      question_type: q.question_type,
-      is_required:   q.is_required,
-      rating_max:    q.rating_max,
-      placeholder:   q.placeholder,
-      options:       ['mcq', 'mcq_multi', 'dropdown', 'yes_no'].includes(q.question_type) ? q.options.filter(o => o.trim()) : [],
-      save_to_bank:  !!q._saveToBank,
-      bank_section_id: q._bankSection || null,
-    })),
+    items: form.items.map(item => {
+      if (item.kind === 'section') {
+        return {
+          kind: 'section',
+          client_id: item.client_id,
+          title: item.title,
+        }
+      }
+      return {
+        kind: 'question',
+        section_ref: item.section_ref || null,
+        question_text: item.question_text,
+        question_type: item.question_type,
+        is_required:   item.is_required,
+        rating_max:    item.rating_max,
+        placeholder:   item.placeholder,
+        options:       ['mcq', 'mcq_multi', 'dropdown', 'yes_no', 'matrix'].includes(item.question_type)
+          ? item.options.filter(o => o.trim())
+          : [],
+        rows: item.question_type === 'matrix' ? item.rows.filter(r => r.trim()) : [],
+        save_to_bank:  !!item._saveToBank,
+        bank_section_id: item._bankSection || null,
+      }
+    }),
   }
 
   if (isEditing.value) {
