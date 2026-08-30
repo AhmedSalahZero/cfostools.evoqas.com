@@ -252,9 +252,7 @@
 
               <!-- Chart view -->
               <div v-if="bd.tab === 'chart'" class="p-6">
-                <div style="height:300px" class="flex items-center justify-center">
-                  <canvas :id="`breakdown-chart-${idx}`"></canvas>
-                </div>
+                <DonutChart3D :data="bd.rows" label-key="label" value-key="value" :height="300" />
               </div>
 
               <!-- Table view -->
@@ -602,6 +600,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
+import DonutChart3D from '@/Components/DonutChart3D.vue'
 import axios from 'axios'
 
 const props = defineProps({
@@ -631,7 +630,6 @@ const trendChartCanvas = ref(null)
 
 let Chart = null
 let trendChart = null
-const breakdownCharts = {}
 
 // ── Chart.js ──
 async function loadChartJs() {
@@ -673,27 +671,9 @@ async function exportBreakdown(bd) {
   XLSX.writeFile(wb, `${props.company.name.replace(/\s+/g,'_')}_${bd.label.replace(/\s+/g,'_')}_${dateFrom.value}_${dateTo.value}.xlsx`)
 }
 
-// ── Color helpers ──
-const PALETTE = [
-  '#10b981','#00b4c8','#00b4c8','#c9a84c','#f59e0b',
-  '#ef4444','#c9a84c','#10b981','#f59e0b','#00b4c8',
-  '#00b4c8','#c9a84c','#f59e0b','#00b4c8','#c9a84c',
-]
 function alpha(hex, a) {
   const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16)
   return `rgba(${r},${g},${b},${a})`
-}
-function lighten(hex, amt) {
-  const r = Math.min(255, parseInt(hex.slice(1,3),16) + Math.round(255*amt))
-  const g = Math.min(255, parseInt(hex.slice(3,5),16) + Math.round(255*amt))
-  const b = Math.min(255, parseInt(hex.slice(5,7),16) + Math.round(255*amt))
-  return `rgb(${r},${g},${b})`
-}
-function darken(hex, amt) {
-  const r = Math.max(0, parseInt(hex.slice(1,3),16) - Math.round(255*amt))
-  const g = Math.max(0, parseInt(hex.slice(3,5),16) - Math.round(255*amt))
-  const b = Math.max(0, parseInt(hex.slice(5,7),16) - Math.round(255*amt))
-  return `rgb(${r},${g},${b})`
 }
 function compactNum(n) {
   if (n >= 1e9) return (n/1e9).toFixed(1) + 'B'
@@ -735,7 +715,6 @@ async function loadDashboard() {
 
     setTimeout(() => {
       renderTrendChart(data.monthly_trend || [])
-      renderAllBreakdownCharts()
     }, 100)
 
   } catch(e) {
@@ -746,13 +725,10 @@ async function loadDashboard() {
 
 function destroyAllCharts() {
   if (trendChart) { trendChart.destroy(); trendChart = null }
-  Object.values(breakdownCharts).forEach(c => c?.destroy())
-  Object.keys(breakdownCharts).forEach(k => delete breakdownCharts[k])
 }
 
 function onTabChange(bd, idx) {
   bd.tab = 'chart'
-  nextTick(() => setTimeout(() => renderSingleBreakdownChart(bd, idx), 50))
 }
 
 // ── Trend Chart ──
@@ -809,87 +785,6 @@ function renderTrendChart(rows) {
         y2: { position: 'right', ticks: { color: '#00b4c8', font: { size: 10 }, callback: v => v + '%' }, grid: { drawOnChartArea: false } },
       }
     }
-  })
-}
-
-// ── Breakdown Donuts ──
-function renderAllBreakdownCharts() {
-  breakdowns.value.forEach((bd, idx) => { if (bd.tab === 'chart') renderSingleBreakdownChart(bd, idx) })
-}
-
-function renderSingleBreakdownChart(bd, idx) {
-  if (breakdownCharts[idx]) { breakdownCharts[idx].destroy(); delete breakdownCharts[idx] }
-  const canvas = document.getElementById(`breakdown-chart-${idx}`)
-  if (!canvas) return
-  const ctx = canvas.getContext('2d')
-  const rows = bd.rows.slice(0, 12)
-  const total = rows.reduce((s, r) => s + r.value, 0)
-
-  const backgroundColors = rows.map((_, i) => {
-    const baseColor = PALETTE[i % PALETTE.length]
-    if (i === 0) {
-      const grad = ctx.createLinearGradient(-150, -150, 150, 150)
-      grad.addColorStop(0, lighten(baseColor, 0.35))
-      grad.addColorStop(0.45, baseColor)
-      grad.addColorStop(1, darken(baseColor, 0.25))
-      return grad
-    }
-    return alpha(baseColor, 0.85)
-  })
-
-  breakdownCharts[idx] = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: rows.map(r => r.label),
-      datasets: [{
-        data: rows.map(r => r.value),
-        backgroundColor: backgroundColors,
-        borderColor: rows.map((_, i) => PALETTE[i % PALETTE.length]),
-        borderWidth: 1.5, hoverOffset: 12, hoverBorderWidth: 2,
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, cutout: '62%',
-      plugins: {
-        legend: {
-          position: 'right',
-          labels: {
-            color: '#ffffff', font: { size: 11 }, padding: 12,
-            usePointStyle: true, pointStyleWidth: 10,
-            generateLabels: (chart) => chart.data.labels.map((label, i) => {
-              const val = chart.data.datasets[0].data[i]
-              const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0
-              return { text: `${label}  ${pct}%`, fillStyle: PALETTE[i % PALETTE.length], strokeStyle: PALETTE[i % PALETTE.length], fontColor: '#ffffff', pointStyle: 'rect', index: i }
-            })
-          }
-        },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const val = ctx.raw
-              const pct = total > 0 ? ((val/total)*100).toFixed(1) : 0
-              return ` ${ctx.label}: ${Number(val).toLocaleString('en-US', { maximumFractionDigits: 0 })} (${pct}%)`
-            }
-          }
-        }
-      },
-      animation: { animateRotate: true, animateScale: true, duration: 700, easing: 'easeOutQuart' }
-    },
-    plugins: [{
-      id: 'centerText',
-      afterDraw(chart) {
-        const { ctx, chartArea } = chart
-        if (!chartArea) return
-        const cx = (chartArea.left + chartArea.right) / 2
-        const cy = (chartArea.top + chartArea.bottom) / 2
-        ctx.save()
-        ctx.font = 'bold 10px sans-serif'; ctx.fillStyle = '#64748b'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        ctx.fillText('TOTAL', cx, cy - 9)
-        ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = '#ffffff'
-        ctx.fillText(compactNum(total), cx, cy + 8)
-        ctx.restore()
-      }
-    }]
   })
 }
 

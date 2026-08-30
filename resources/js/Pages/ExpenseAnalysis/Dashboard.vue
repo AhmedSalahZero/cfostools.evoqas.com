@@ -151,9 +151,7 @@
 
           <!-- Chart -->
           <div v-if="breakdownTab === 'chart'" class="p-6">
-            <div style="height:300px" class="flex items-center justify-center">
-              <canvas id="breakdown-donut-chart"></canvas>
-            </div>
+            <DonutChart3D :data="categoryBreakdown" label-key="category" value-key="total" :height="300" />
           </div>
 
           <!-- Table -->
@@ -381,6 +379,7 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
+import DonutChart3D from '@/Components/DonutChart3D.vue'
 import axios from 'axios'
 
 const props = defineProps({
@@ -414,34 +413,12 @@ const trendChartCanvas = ref(null)
 // ── Chart.js instances ──
 let Chart         = null
 let trendChart    = null
-let donutChart    = null
-
-// ── EXACT same palette as Sales Dashboard ──
-const PALETTE = [
-  '#00b4c8','#c9a84c','#00b4c8','#10b981','#f59e0b',
-  '#ef4444','#c9a84c','#10b981','#f59e0b','#00b4c8',
-  '#00b4c8','#c9a84c','#f59e0b','#00b4c8','#c9a84c',
-]
 
 function alpha(hex, a) {
   const r = parseInt(hex.slice(1,3),16)
   const g = parseInt(hex.slice(3,5),16)
   const b = parseInt(hex.slice(5,7),16)
   return `rgba(${r},${g},${b},${a})`
-}
-
-function lighten(hex, amt) {
-  const r = Math.min(255, parseInt(hex.slice(1,3),16) + Math.round(255*amt))
-  const g = Math.min(255, parseInt(hex.slice(3,5),16) + Math.round(255*amt))
-  const b = Math.min(255, parseInt(hex.slice(5,7),16) + Math.round(255*amt))
-  return `rgb(${r},${g},${b})`
-}
-
-function darken(hex, amt) {
-  const r = Math.max(0, parseInt(hex.slice(1,3),16) - Math.round(255*amt))
-  const g = Math.max(0, parseInt(hex.slice(3,5),16) - Math.round(255*amt))
-  const b = Math.max(0, parseInt(hex.slice(5,7),16) - Math.round(255*amt))
-  return `rgb(${r},${g},${b})`
 }
 
 function compactNum(n) {
@@ -466,7 +443,6 @@ async function loadChartJs() {
 
 function destroyAllCharts() {
   if (trendChart) { trendChart.destroy(); trendChart = null }
-  if (donutChart) { donutChart.destroy(); donutChart = null }
 }
 
 // ── TREND CHART — IDENTICAL to Sales Dashboard renderTrendChart ──
@@ -546,112 +522,10 @@ function renderTrendChart(rows) {
 }
 
 // ── DONUT CHART — IDENTICAL to Sales Dashboard renderSingleBreakdownChart ──
-function renderDonutChart() {
-  if (donutChart) { donutChart.destroy(); donutChart = null }
-  const canvas = document.getElementById('breakdown-donut-chart')
-  if (!canvas) return
-
-  const ctx  = canvas.getContext('2d')
-  const rows = categoryBreakdown.value.slice(0, 12)
-  const total = rows.reduce((s, r) => s + r.total, 0)
-
-  // Build colors — dominant slice gets gradient for 3D feel
-  const backgroundColors = rows.map((_, i) => {
-    const baseColor = PALETTE[i % PALETTE.length]
-    if (i === 0) {
-      const grad = ctx.createLinearGradient(-150, -150, 150, 150)
-      grad.addColorStop(0, lighten(baseColor, 0.35))
-      grad.addColorStop(0.45, baseColor)
-      grad.addColorStop(1, darken(baseColor, 0.25))
-      return grad
-    }
-    return alpha(baseColor, 0.85)
-  })
-
-  donutChart = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: rows.map(r => r.category),
-      datasets: [{
-        data: rows.map(r => r.total),
-        backgroundColor: backgroundColors,
-        borderColor: rows.map((_, i) => PALETTE[i % PALETTE.length]),
-        borderWidth: 1.5,
-        hoverOffset: 12,
-        hoverBorderWidth: 2,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '60%',
-      plugins: {
-        legend: {
-          position: 'right',
-          labels: {
-            color: '#ffffff',
-            font: { size: 11 },
-            padding: 10,
-            usePointStyle: true,
-            pointStyleWidth: 10,
-            generateLabels: (chart) => {
-              return chart.data.labels.map((label, i) => {
-                const val = chart.data.datasets[0].data[i]
-                const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0
-                return {
-                  text: `${label}  ${pct}%`,
-                  fillStyle: PALETTE[i % PALETTE.length],
-                  strokeStyle: PALETTE[i % PALETTE.length],
-                  fontColor: '#ffffff',
-                  pointStyle: 'rect',
-                  index: i,
-                }
-              })
-            }
-          }
-        },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const val = ctx.raw
-              const pct = total > 0 ? ((val/total)*100).toFixed(1) : 0
-              return ` ${ctx.label}: ${Number(val).toLocaleString('en-US', { maximumFractionDigits: 0 })} (${pct}%)`
-            }
-          }
-        }
-      },
-      animation: { animateRotate: true, animateScale: true, duration: 700, easing: 'easeOutQuart' }
-    },
-    plugins: [{
-      id: 'centerText',
-      afterDraw(chart) {
-        const { ctx, chartArea } = chart
-        if (!chartArea) return
-        const cx = (chartArea.left + chartArea.right) / 2
-        const cy = (chartArea.top + chartArea.bottom) / 2
-        ctx.save()
-        ctx.font = 'bold 10px sans-serif'
-        ctx.fillStyle = '#64748b'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText('TOTAL', cx, cy - 9)
-        ctx.font = 'bold 13px sans-serif'
-        ctx.fillStyle = '#ffffff'
-        ctx.fillText(compactNum(total), cx, cy + 8)
-        ctx.restore()
-      }
-    }]
-  })
-}
-
-// When user switches breakdown back to chart tab
+// When user switches breakdown back to chart tab — <DonutChart3D>
+// re-renders itself on mount, no manual re-render needed.
 function onBreakdownTabChange(tab) {
   breakdownTab.value = tab
-  if (tab === 'chart') {
-    nextTick(() => {
-      setTimeout(() => renderDonutChart(), 50)
-    })
-  }
 }
 
 async function loadData() {
@@ -674,7 +548,6 @@ async function loadData() {
     // Same pattern as Sales Dashboard
     setTimeout(() => {
       renderTrendChart(res.data.monthly_trend || [])
-      renderDonutChart()
     }, 100)
   } catch (e) {
     console.error(e)

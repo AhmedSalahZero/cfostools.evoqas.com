@@ -357,35 +357,40 @@ class SalesDashboardController extends Controller
         $activeFields = $this->getActiveFields($companyId);
         if (!in_array('customer_name', $activeFields)) return null;
 
-        $currentYear = date('Y', strtotime($dateTo));
-        $lastYear    = $currentYear - 1;
-        $twoYearsAgo = $currentYear - 2;
+        $currentYear = (int) date('Y', strtotime($dateTo));
 
-        $thisYear = SalesData::where('portfolio_company_id', $companyId)
-            ->whereYear('date', $currentYear)->whereNotNull('customer_name')
-            ->pluck('customer_name')->unique();
-
-        $prevYear = SalesData::where('portfolio_company_id', $companyId)
-            ->whereYear('date', $lastYear)->whereNotNull('customer_name')
-            ->pluck('customer_name')->unique();
-
-        $twoYears = SalesData::where('portfolio_company_id', $companyId)
-            ->whereYear('date', $twoYearsAgo)->whereNotNull('customer_name')
-            ->pluck('customer_name')->unique();
-
-        $active = SalesData::where('portfolio_company_id', $companyId)
-            ->whereNotNull('customer_name')
-            ->selectRaw('customer_name, COUNT(DISTINCT YEAR(`date`)) as year_count')
-            ->groupBy('customer_name')->having('year_count', '>=', 3)
-            ->pluck('customer_name')->unique();
+        // Y, Y-1, Y-2, Y-3, Y-4 — need back to Y-4 because "Repeating" checks
+        // whether Y-1 was itself that customer's New year (looks back 3
+        // years from Y-1, i.e. as far as Y-4).
+        $years = [];
+        for ($i = 0; $i <= 4; $i++) {
+            $y = $currentYear - $i;
+            $years[$i] = SalesData::where('portfolio_company_id', $companyId)
+                ->whereYear('date', $y)->whereNotNull('customer_name')
+                ->pluck('customer_name')->unique();
+        }
+        [$setY, $setY1, $setY2, $setY3, $setY4] = $years;
 
         $buckets = [
-            'new'              => $thisYear->diff($prevYear)->diff($twoYears)->values(),
-            'repeating'        => $thisYear->intersect($prevYear)->diff($twoYears)->values(),
-            'active'           => $thisYear->intersect($active)->values(),
-            'stop'             => $prevYear->diff($thisYear)->values(),
-            'dead'             => $twoYears->diff($prevYear)->diff($thisYear)->values(),
-            'stop_reactivated' => $thisYear->intersect($twoYears)->diff($prevYear)->values(),
+            // Active this year, absent the 3 years before — true first-timers
+            // (also correctly catches anyone returning after a 3+ year gap).
+            'new'              => $setY->diff($setY1)->diff($setY2)->diff($setY3)->values(),
+
+            // Active this year AND last year, AND last year was itself a
+            // "New" year for them (absent the 3 years before that).
+            'repeating'        => $setY->intersect($setY1)->diff($setY2)->diff($setY3)->diff($setY4)->values(),
+
+            // Active 3 straight consecutive years: Y, Y-1, Y-2.
+            'active'           => $setY->intersect($setY1)->intersect($setY2)->values(),
+
+            'stop'             => $setY1->diff($setY)->values(),
+            'dead'             => $setY2->diff($setY1)->diff($setY)->values(),
+
+            // Active Y-2, paused Y-1, back this year (1-year gap).
+            'stop_reactivated' => $setY->intersect($setY2)->diff($setY1)->values(),
+
+            // Active Y-3, paused Y-2 AND Y-1, back this year (2-year gap).
+            'dead_reactivated' => $setY->intersect($setY3)->diff($setY2)->diff($setY1)->values(),
         ];
 
         $salesByCustomer = SalesData::where('portfolio_company_id', $companyId)
@@ -394,23 +399,48 @@ class SalesDashboardController extends Controller
             ->selectRaw('customer_name, SUM(net_sales_value) as total_sales')
             ->groupBy('customer_name')->get()->keyBy('customer_name');
 
+        // "Stop" and "Dead" customers have zero sales in the selected
+        // period by definition. Show their sales from the last year they
+        // were genuinely active instead, so the user can see how much
+        // revenue is actually being lost.
+        $salesLastYear = SalesData::where('portfolio_company_id', $companyId)
+            ->whereYear('date', $currentYear - 1)
+            ->whereNotNull('customer_name')->where('customer_name', '!=', '')
+            ->selectRaw('customer_name, SUM(net_sales_value) as total_sales')
+            ->groupBy('customer_name')->get()->keyBy('customer_name');
+
+        $salesTwoYearsAgo = SalesData::where('portfolio_company_id', $companyId)
+            ->whereYear('date', $currentYear - 2)
+            ->whereNotNull('customer_name')->where('customer_name', '!=', '')
+            ->selectRaw('customer_name, SUM(net_sales_value) as total_sales')
+            ->groupBy('customer_name')->get()->keyBy('customer_name');
+
+        $pastPeriodSales = ['stop' => $salesLastYear, 'dead' => $salesTwoYearsAgo];
+        $pastPeriodYear  = ['stop' => $currentYear - 1, 'dead' => $currentYear - 2];
+
         $grandTotal = $salesByCustomer->sum('total_sales');
 
-        $categories = collect($buckets)->map(function($customers, $key) use ($salesByCustomer, $grandTotal) {
-            $rows = $customers->map(function($name) use ($salesByCustomer, $grandTotal) {
-                $sales = (float)($salesByCustomer[$name]->total_sales ?? 0);
-                return [
-                    'name'       => $name,
-                    'sales'      => $sales,
-                    'percentage' => $grandTotal > 0 ? round($sales/$grandTotal*100, 2) : 0,
-                ];
+        $categories = collect($buckets)->map(function($customers, $key) use ($pastPeriodSales, $pastPeriodYear, $salesByCustomer, $grandTotal) {
+            $isPastPeriod = isset($pastPeriodSales[$key]);
+            $salesMap     = $pastPeriodSales[$key] ?? $salesByCustomer;
+
+            $rows = $customers->map(function($name) use ($salesMap) {
+                return ['name' => $name, 'sales' => (float) ($salesMap[$name]->total_sales ?? 0)];
             })->sortByDesc('sales')->values();
 
+            $percentBase = $isPastPeriod ? $rows->sum('sales') : $grandTotal;
+            $rows = $rows->map(function ($r) use ($percentBase) {
+                $r['percentage'] = $percentBase > 0 ? round($r['sales'] / $percentBase * 100, 2) : 0;
+                return $r;
+            });
+
             return [
-                'label'       => $key,
-                'count'       => $customers->count(),
-                'total_sales' => $rows->sum('sales'),
-                'customers'   => $rows->take(100)->values(),
+                'label'             => $key,
+                'count'             => $customers->count(),
+                'total_sales'       => $rows->sum('sales'),
+                'is_past_period'    => $isPastPeriod,
+                'sales_period_year' => $isPastPeriod ? $pastPeriodYear[$key] : null,
+                'customers'         => $rows->values(),
             ];
         });
 

@@ -71,6 +71,7 @@ Route::middleware(['auth', 'role:super-admin|admin'])->group(function () {
 // ── Public Survey Routes (NO auth required) ───────────────────────────────────
 Route::get('/s/{token}',  [App\Http\Controllers\SurveyController::class, 'publicShow'])->name('survey.public');
 Route::post('/s/{token}', [App\Http\Controllers\SurveyController::class, 'publicSubmit'])->name('survey.public.submit');
+Route::get('/cd/{token}', [App\Http\Controllers\ComparisonDashboardController::class, 'publicShow'])->name('comparison-dashboard.public');
 
 
 // ── All authenticated users ───────────────────────────────────────────────────
@@ -115,6 +116,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/companies/{company}/sales/upload', [App\Http\Controllers\SalesAnalysisController::class, 'processUpload'])->name('sales.process-upload');
     Route::get('/companies/{company}/sales/reports', [App\Http\Controllers\SalesAnalysisController::class, 'reportsPage'])->name('sales.reports');
     Route::post('/companies/{company}/sales/reports/run', [App\Http\Controllers\SalesAnalysisController::class, 'runReport'])->name('sales.run-report');
+    Route::get('/companies/{company}/sales/reports/dimension-items', [App\Http\Controllers\SalesAnalysisController::class, 'dimensionItems'])->name('sales.dimension-items');
     Route::post('/companies/{company}/sales/export-report', [App\Http\Controllers\SalesAnalysisController::class, 'exportReport'])->name('sales.export-report');
     Route::get('/companies/{company}/sales', [App\Http\Controllers\SalesDashboardController::class, 'dashboardPage'])->name('sales.dashboard');
     Route::get('/companies/{company}/sales/dashboard-data', [App\Http\Controllers\SalesDashboardController::class, 'dashboardData'])->name('sales.dashboard-data');
@@ -124,6 +126,17 @@ Route::middleware(['auth'])->group(function () {
     Route::put('/companies/{company}/sales/notes/{note}', [App\Http\Controllers\SalesDashboardController::class, 'updateNote'])->name('sales.update-note');
     Route::delete('/companies/{company}/sales/notes/{note}', [App\Http\Controllers\SalesDashboardController::class, 'deleteNote'])->name('sales.delete-note');
     Route::delete('/companies/{company}/sales/uploads/{upload}', [App\Http\Controllers\SalesAnalysisController::class, 'deleteUpload'])->name('sales.delete-upload');
+
+    // ── Comparison Dashboard ────────────────────────────────────────────────
+    Route::get('/companies/{company}/comparison-dashboard', [App\Http\Controllers\ComparisonDashboardController::class, 'index'])->name('comparison-dashboard.index');
+    Route::get('/companies/{company}/comparison-dashboard/create', [App\Http\Controllers\ComparisonDashboardController::class, 'create'])->name('comparison-dashboard.create');
+    Route::post('/companies/{company}/comparison-dashboard', [App\Http\Controllers\ComparisonDashboardController::class, 'store'])->name('comparison-dashboard.store');
+    Route::get('/companies/{company}/comparison-dashboard/{dashboard}', [App\Http\Controllers\ComparisonDashboardController::class, 'show'])->name('comparison-dashboard.show');
+    Route::delete('/companies/{company}/comparison-dashboard/{dashboard}', [App\Http\Controllers\ComparisonDashboardController::class, 'destroy'])->name('comparison-dashboard.destroy');
+    Route::post('/companies/{company}/comparison-dashboard/{dashboard}/toggle-share', [App\Http\Controllers\ComparisonDashboardController::class, 'toggleShare'])->name('comparison-dashboard.toggle-share');
+    Route::post('/companies/{company}/comparison-dashboard/{dashboard}/save-note', [App\Http\Controllers\ComparisonDashboardController::class, 'saveNote'])->name('comparison-dashboard.save-note');
+    Route::get('/companies/{company}/comparison-dashboard/{dashboard}/get-notes', [App\Http\Controllers\ComparisonDashboardController::class, 'getNotes'])->name('comparison-dashboard.get-notes');
+    Route::delete('/companies/{company}/comparison-dashboard/{dashboard}/notes/{note}', [App\Http\Controllers\ComparisonDashboardController::class, 'deleteNote'])->name('comparison-dashboard.delete-note');
 
    
    // ────────────────────────────────────────────────────────────────────────────

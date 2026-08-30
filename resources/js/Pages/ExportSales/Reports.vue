@@ -74,12 +74,12 @@
 
             <!-- Dates + Period -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
+              <div v-if="params.report_type !== 'period_comparison'">
                 <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Date From</label>
                 <input v-model="params.date_from" type="date"
                   class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success" />
               </div>
-              <div>
+              <div v-if="params.report_type !== 'period_comparison'">
                 <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Date To</label>
                 <input v-model="params.date_to" type="date"
                   class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success" />
@@ -125,17 +125,65 @@
               </div>
             </div>
 
-            <!-- Period Comparison extra dates -->
-            <div v-if="params.report_type === 'period_comparison'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Compare Period From</label>
-                <input v-model="params.compare_from" type="date"
-                  class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success" />
+            <!-- Two Factors Trend / Matrix: item-level multi-selectors for each axis -->
+            <div v-if="['two_factors_trend', 'matrix'].includes(params.report_type)" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <DimensionMultiSelect
+                v-if="params.dimension1"
+                :company-id="company.id"
+                :dimension="params.dimension1"
+                :date-from="params.date_from"
+                :date-to="params.date_to"
+                :metric="params.metric"
+                v-model="params.dim1_items"
+                :label="`${dimensionFields[params.dimension1] || (params.report_type === 'matrix' ? 'Row' : 'Factor 1')} items`" />
+              <DimensionMultiSelect
+                v-if="params.dimension2"
+                :company-id="company.id"
+                :dimension="params.dimension2"
+                :date-from="params.date_from"
+                :date-to="params.date_to"
+                :metric="params.metric"
+                v-model="params.dim2_items"
+                :label="`${dimensionFields[params.dimension2] || (params.report_type === 'matrix' ? 'Column' : 'Factor 2')} items`" />
+            </div>
+
+            <!-- Period Comparison: how many periods + their date ranges -->
+            <div v-if="params.report_type === 'period_comparison'" class="space-y-4">
+              <div class="max-w-xs">
+                <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Number of Periods to Compare</label>
+                <select v-model.number="periodsCount"
+                  class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success">
+                  <option :value="2">2 Periods</option>
+                  <option :value="3">3 Periods</option>
+                  <option :value="4">4 Periods</option>
+                  <option :value="5">5 Periods</option>
+                </select>
               </div>
-              <div>
-                <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Compare Period To</label>
-                <input v-model="params.compare_to" type="date"
-                  class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success" />
+              <div class="space-y-3">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Period 1 From</label>
+                    <input v-model="params.date_from" type="date"
+                      class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Period 1 To</label>
+                    <input v-model="params.date_to" type="date"
+                      class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success" />
+                  </div>
+                </div>
+                <div v-for="(p, i) in extraPeriods" :key="i" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Period {{ i + 2 }} From</label>
+                    <input v-model="p.from" type="date"
+                      class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Period {{ i + 2 }} To</label>
+                    <input v-model="p.to" type="date"
+                      class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-success" />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -213,7 +261,9 @@
               <tbody>
                 <tr v-for="(row, i) in result.rows" :key="i" class="border-b border-mp-border/50 hover:bg-mp-card-hover/30 transition-colors">
                   <td class="px-6 py-3 text-mp-muted text-xs">{{ i + 1 }}</td>
-                  <td class="px-6 py-3 text-mp-text-secondary font-medium">{{ row.label }}</td>
+                  <td class="px-6 py-3 text-mp-text-secondary font-medium">
+                    {{ row.label }}<span v-if="row.is_other" class="text-mp-muted font-normal"> ({{ row.other_count }} items)</span>
+                  </td>
                   <td class="px-6 py-3 text-right text-mp-success font-mono text-xs">{{ fmt(row.value) }}</td>
                   <td class="px-6 py-3 text-right text-mp-muted text-xs">{{ Number(row.transactions).toLocaleString() }}</td>
                   <td class="px-6 py-3 text-right text-mp-muted text-xs">{{ getShare(row.value, result.rows).toFixed(1) }}%</td>
@@ -240,6 +290,7 @@
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-mp-border">
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">#</th>
                   <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Period</th>
                   <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">{{ metricFields[result.metric] || result.metric }}</th>
                   <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">vs Previous</th>
@@ -248,6 +299,7 @@
               <tbody>
                 <template v-for="(row, i) in result.rows" :key="i">
                   <tr class="border-b border-mp-border/50 hover:bg-mp-card-hover/30 transition-colors">
+                    <td class="px-6 py-3 text-mp-muted text-xs">{{ i + 1 }}</td>
                     <td class="px-6 py-3 text-mp-text-secondary font-mono text-xs">{{ row.period }}</td>
                     <td class="px-6 py-3 text-right text-mp-success font-mono text-xs">{{ fmt(row.value) }}</td>
                     <td class="px-6 py-3 text-right text-xs">
@@ -267,6 +319,7 @@
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-mp-border">
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-4 py-3">#</th>
                   <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-4 py-3 sticky left-0 bg-mp-card">
                     {{ fields[result.dim1] || result.dim1 }}
                   </th>
@@ -278,6 +331,7 @@
               </thead>
               <tbody>
                 <tr v-for="(row, i) in result.rows" :key="i" class="border-b border-mp-border/50 hover:bg-mp-card-hover/30 transition-colors">
+                  <td class="px-4 py-2.5 text-mp-muted text-xs">{{ i + 1 }}</td>
                   <td class="px-4 py-2.5 text-mp-text-secondary font-medium text-xs sticky left-0 bg-mp-card">{{ row.label }}</td>
                   <td v-for="col in result.columns" :key="col" class="px-4 py-2.5 text-right text-mp-text font-mono text-xs">
                     {{ fmt(row[col] || 0) }}
@@ -295,23 +349,33 @@
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-mp-border">
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">#</th>
                   <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Label</th>
-                  <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Period 1</th>
-                  <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Period 2</th>
-                  <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Change %</th>
+                  <template v-for="(p, pi) in result.periods" :key="pi">
+                    <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">
+                      Period {{ pi + 1 }}<br><span class="font-normal text-mp-muted">{{ p.from }} → {{ p.to }}</span>
+                    </th>
+                    <th v-if="pi > 0" class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Change %</th>
+                  </template>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(row, i) in result.rows" :key="i" class="border-b border-mp-border/50 hover:bg-mp-card-hover/30 transition-colors">
-                  <td class="px-6 py-3 text-mp-text-secondary font-medium">{{ row.label }}</td>
-                  <td class="px-6 py-3 text-right text-mp-success font-mono text-xs">{{ fmt(row.period1) }}</td>
-                  <td class="px-6 py-3 text-right text-white font-mono text-xs">{{ fmt(row.period2) }}</td>
-                  <td class="px-6 py-3 text-right text-xs">
-                    <span v-if="row.change !== null" :class="row.change >= 0 ? 'text-mp-success' : 'text-mp-danger'">
-                      {{ row.change >= 0 ? '▲' : '▼' }} {{ Math.abs(row.change) }}%
-                    </span>
-                    <span v-else class="text-mp-muted">N/A</span>
+                <tr v-for="(row, i) in result.rows" :key="i"
+                  class="border-b border-mp-border/50 hover:bg-mp-card-hover/30 transition-colors"
+                  :class="row.is_other ? 'italic' : ''">
+                  <td class="px-6 py-3 text-mp-muted text-xs">{{ i + 1 }}</td>
+                  <td class="px-6 py-3 text-mp-text-secondary font-medium">
+                    {{ row.label }}<span v-if="row.is_other" class="text-mp-muted font-normal"> ({{ row.other_count }} items)</span>
                   </td>
+                  <template v-for="(p, pi) in result.periods" :key="pi">
+                    <td class="px-6 py-3 text-right text-mp-text font-mono text-xs">{{ fmt(row.values[pi]) }}</td>
+                    <td v-if="pi > 0" class="px-6 py-3 text-right text-xs">
+                      <span v-if="row.changes[pi] !== null" :class="row.changes[pi] >= 0 ? 'text-mp-success' : 'text-mp-danger'">
+                        {{ row.changes[pi] >= 0 ? '▲' : '▼' }} {{ Math.abs(row.changes[pi]) }}%
+                      </span>
+                      <span v-else class="text-mp-muted">N/A</span>
+                    </td>
+                  </template>
                 </tr>
               </tbody>
             </table>
@@ -337,8 +401,9 @@
                   <tr class="border-b border-mp-border bg-mp-card-hover/50 cursor-pointer hover:bg-mp-page/50 transition-colors"
                     @click="toggleExpand(parent.label)">
                     <td class="px-4 py-2.5 text-mp-text-secondary font-bold text-xs sticky left-0 bg-mp-card-hover">
+                      <span class="text-mp-muted mr-1">{{ pi + 1 }}.</span>
                       <span class="mr-1">{{ expanded.has(parent.label) ? '▾' : '▸' }}</span>
-                      {{ parent.label }}
+                      <span :class="parent.is_other ? 'italic' : ''">{{ parent.label }}<span v-if="parent.is_other" class="text-mp-muted font-normal"> ({{ parent.other_count }} items)</span></span>
                     </td>
                     <td v-for="p in result.periods" :key="p" class="px-3 py-2.5 text-right font-bold font-mono text-xs">
                       <span class="text-mp-text-secondary">{{ fmt(parent.cells[p]?.value || 0) }}</span>
@@ -352,7 +417,10 @@
                   <template v-if="expanded.has(parent.label)">
                     <tr v-for="(child, ci) in parent.children" :key="ci"
                       class="border-b border-mp-border/50 hover:bg-mp-card-hover/20 transition-colors">
-                      <td class="px-4 py-2 pl-8 text-mp-text text-xs sticky left-0 bg-mp-card">{{ child.label }}</td>
+                      <td class="px-4 py-2 pl-8 text-mp-text text-xs sticky left-0 bg-mp-card" :class="child.is_other ? 'italic' : ''">
+                        <span class="text-mp-muted">{{ ci + 1 }}.</span>
+                        {{ child.label }}<span v-if="child.is_other" class="text-mp-muted"> ({{ child.other_count }} items)</span>
+                      </td>
                       <td v-for="p in result.periods" :key="p" class="px-3 py-2 text-right text-mp-text font-mono text-xs">
                         {{ fmt(child.cells[p]?.value || 0) }}
                       </td>
@@ -369,6 +437,7 @@
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-mp-border">
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">#</th>
                   <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">PO Status</th>
                   <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Count</th>
                   <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Total Value</th>
@@ -378,6 +447,7 @@
               </thead>
               <tbody>
                 <tr v-for="(row, i) in result.rows" :key="i" class="border-b border-mp-border/50 hover:bg-mp-card-hover/30 transition-colors">
+                  <td class="px-6 py-3 text-mp-muted text-xs">{{ i + 1 }}</td>
                   <td class="px-6 py-3 text-mp-text-secondary font-medium">{{ row.status }}</td>
                   <td class="px-6 py-3 text-right text-mp-text font-mono text-xs">{{ Number(row.count).toLocaleString() }}</td>
                   <td class="px-6 py-3 text-right text-mp-success font-mono text-xs">{{ fmt(row.value) }}</td>
@@ -391,6 +461,7 @@
               </tbody>
               <tfoot>
                 <tr class="bg-mp-card-hover/60">
+                  <td class="px-6 py-3"></td>
                   <td class="px-6 py-3 text-mp-text-secondary font-bold text-xs uppercase tracking-widest">Total</td>
                   <td class="px-6 py-3 text-right text-mp-text font-bold font-mono text-xs">{{ result.rows.reduce((s,r)=>s+parseInt(r.count||0),0).toLocaleString() }}</td>
                   <td class="px-6 py-3 text-right text-mp-success font-bold font-mono text-xs">{{ fmt(result.rows.reduce((s,r)=>s+parseFloat(r.value||0),0)) }}</td>
@@ -405,6 +476,7 @@
             <table class="w-full text-sm">
               <thead>
                 <tr class="border-b border-mp-border">
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">#</th>
                   <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Destination</th>
                   <th v-for="r in result.num_ranks" :key="r" class="text-center text-xs font-semibold text-white uppercase tracking-widest px-4 py-3">
                     Rank {{ r }}
@@ -413,6 +485,7 @@
               </thead>
               <tbody>
                 <tr v-for="(row, i) in result.rows" :key="i" class="border-b border-mp-border/50 hover:bg-mp-card-hover/30 transition-colors">
+                  <td class="px-6 py-3 text-mp-muted text-xs">{{ i + 1 }}</td>
                   <td class="px-6 py-3 text-mp-text-secondary font-medium">{{ row.branch }}</td>
                   <td v-for="r in result.num_ranks" :key="r" class="px-4 py-3 text-center">
                     <div v-if="row.ranks[r]?.count > 0">
@@ -427,6 +500,27 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          <!-- Customer Nature -->
+          <div v-else-if="result.type === 'customer_nature'" class="p-6">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div v-for="(cat, key) in result.categories" :key="key"
+                :class="natureBg(cat.label)"
+                class="rounded-xl border p-4 cursor-pointer hover:opacity-90 transition-opacity"
+                @click="naturePopup = cat">
+                <p class="text-xs font-semibold uppercase tracking-widest mb-1" :class="natureText(cat.label)">
+                  {{ natureLabel(cat.label) }}
+                </p>
+                <p class="text-4xl font-bold text-mp-text-secondary">{{ cat.count }}</p>
+                <p class="text-xs mt-2" :class="natureText(cat.label)">{{ fmt(cat.total_sales) }}</p>
+                <p class="text-xs text-mp-muted mt-1">Click to view details</p>
+              </div>
+            </div>
+            <div class="mt-4 flex items-center justify-between bg-mp-card-hover/50 border-t-2 border-mp-border rounded-lg px-4 py-3">
+              <span class="text-mp-text-secondary font-bold text-sm">Total</span>
+              <span class="text-mp-text-secondary font-bold text-sm">{{ fmt(result.grand_total) }}</span>
+            </div>
           </div>
 
         </div>
@@ -450,14 +544,61 @@
             </button>
           </div>
           <div class="space-y-2">
-            <div v-for="prod in rankPopup.products" :key="prod.product" class="flex items-center justify-between bg-mp-card-hover rounded-lg px-4 py-2.5">
-              <span class="text-mp-text-secondary text-sm">{{ prod.product }}</span>
+            <div v-for="(prod, i) in rankPopup.products" :key="prod.product" class="flex items-center justify-between bg-mp-card-hover rounded-lg px-4 py-2.5">
+              <span class="text-mp-muted text-xs w-6">{{ i + 1 }}.</span>
+              <span class="text-mp-text-secondary text-sm flex-1">{{ prod.product }}</span>
               <span class="text-mp-success font-mono text-xs">{{ fmt(prod.value) }}</span>
             </div>
           </div>
           <div class="mt-3 pt-3 border-t border-mp-border flex justify-between">
             <span class="text-mp-muted text-sm font-semibold">Total</span>
             <span class="text-mp-success font-bold font-mono text-sm">{{ fmt(rankPopup.total) }}</span>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Customer Nature popup -->
+    <Teleport to="body">
+      <div v-if="naturePopup" class="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4" @click.self="naturePopup = null">
+        <div class="bg-mp-card border border-mp-border rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[80vh]">
+          <div class="flex items-center justify-between px-6 py-4 border-b border-mp-border flex-shrink-0">
+            <div>
+              <p class="text-mp-text-secondary font-semibold text-lg">{{ natureLabel(naturePopup.label) }}</p>
+              <p class="text-xs mt-0.5" :class="natureText(naturePopup.label)">
+                {{ naturePopup.count }} customer(s) — Total: {{ fmt(naturePopup.total_sales) }}
+              </p>
+            </div>
+            <button @click="naturePopup = null" class="text-mp-muted hover:text-mp-text-secondary">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div v-if="naturePopup.is_past_period" class="px-6 py-2.5 bg-mp-warning/20 border-b border-mp-warning/40 text-xs text-mp-warning">
+            These customers had no sales in the selected period — figures shown are from {{ naturePopup.sales_period_year }}, the last year they were active, so you can see the revenue being lost.
+          </div>
+          <div class="overflow-y-auto flex-1">
+            <table class="w-full text-sm">
+              <thead class="sticky top-0 bg-mp-card">
+                <tr class="border-b border-mp-border">
+                  <th class="text-left text-xs font-semibold text-white uppercase px-6 py-3">#</th>
+                  <th class="text-left text-xs font-semibold text-white uppercase px-6 py-3">Customer Name</th>
+                  <th class="text-right text-xs font-semibold text-white uppercase px-6 py-3">
+                    {{ naturePopup.is_past_period ? `Value in ${naturePopup.sales_period_year}` : 'Value' }}
+                  </th>
+                  <th class="text-right text-xs font-semibold text-white uppercase px-6 py-3">% of Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(customer, i) in naturePopup.customers" :key="customer.name" class="border-b border-mp-border/50 hover:bg-mp-card-hover/30">
+                  <td class="px-6 py-3 text-mp-muted text-xs">{{ i + 1 }}</td>
+                  <td class="px-6 py-3 text-mp-text-secondary">{{ customer.name }}</td>
+                  <td class="px-6 py-3 text-right text-mp-success font-mono text-xs">{{ fmt(customer.sales) }}</td>
+                  <td class="px-6 py-3 text-right text-mp-muted text-xs">{{ customer.percentage }}%</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -470,6 +611,8 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
+import DimensionMultiSelect from '@/Components/DimensionMultiSelect.vue'
+import { generateDistinctColors, shadeColor } from '@/Utils/chartColors'
 import axios from 'axios'
 
 const props = defineProps({
@@ -485,6 +628,7 @@ const running    = ref(false)
 const exporting  = ref(false)
 const result     = ref(null)
 const rankPopup  = ref(null)
+const naturePopup= ref(null)
 const expanded   = ref(new Set())
 const chartCanvas= ref(null)
 let chartInstance = null
@@ -508,7 +652,7 @@ function alpha(hex, a) {
   return `rgba(${r},${g},${b},${a})`
 }
 
-const showChart = computed(() => result.value && ['single_dimension','trend','matrix','period_comparison','two_factors_trend','po_status'].includes(result.value?.type))
+const showChart = computed(() => result.value && ['single_dimension','trend','matrix','period_comparison','two_factors_trend','po_status','customer_nature'].includes(result.value?.type))
 
 watch(result, async (val) => {
   if (!val) { destroyChart(); return }
@@ -568,14 +712,99 @@ function renderChart(data) {
       options: chartDefaults()
     })
   } else if (data.type === 'period_comparison') {
-    const rows = data.rows||[]
+    const rows = data.rows || []
+    const periods = data.periods || []
     chartInstance = new Chart(ctx, {
       type: 'bar',
-      data: { labels: rows.map(r=>r.label), datasets: [
-        { label:`Period 1 (${data.period1.from} → ${data.period1.to})`, data:rows.map(r=>parseFloat(r.period1)||0), backgroundColor:alpha('#10b981',0.8), borderColor:'#10b981', borderWidth:1, borderRadius:3 },
-        { label:`Period 2 (${data.period2.from} → ${data.period2.to})`, data:rows.map(r=>parseFloat(r.period2)||0), backgroundColor:alpha('#00b4c8',0.8), borderColor:'#00b4c8', borderWidth:1, borderRadius:3 }
-      ]},
+      data: {
+        labels: rows.map(r => r.label),
+        datasets: periods.map((p, pi) => ({
+          label: `Period ${pi + 1} (${p.from} → ${p.to})`,
+          data: rows.map(r => parseFloat(r.values?.[pi]) || 0),
+          backgroundColor: alpha(COLORS[pi % COLORS.length], 0.8),
+          borderColor: COLORS[pi % COLORS.length],
+          borderWidth: 1,
+          borderRadius: 3,
+        }))
+      },
       options: chartDefaults()
+    })
+  } else if (data.type === 'customer_nature') {
+    const cats  = Object.values(data.categories || {})
+    const colors = generateDistinctColors(cats.length)
+    const total  = cats.reduce((s, c) => s + (c.count || 0), 0)
+
+    const gradientDonut = {
+      id: 'gradientDonutCustomerNature',
+      beforeDraw(chart) {
+        const meta = chart.getDatasetMeta(0)
+        meta.data.forEach((arc, i) => {
+          const { x: cx, y: cy, outerRadius: outer, innerRadius: inner } = arc
+          const base = colors[i]
+          const grad = chart.ctx.createRadialGradient(cx, cy, inner, cx, cy, outer)
+          grad.addColorStop(0, shadeColor(base, 35))
+          grad.addColorStop(0.55, base)
+          grad.addColorStop(1, shadeColor(base, -30))
+          arc.options.backgroundColor = grad
+        })
+      },
+      beforeDatasetsDraw(chart) {
+        chart.ctx.save()
+        chart.ctx.shadowColor = 'rgba(0,0,0,0.35)'
+        chart.ctx.shadowBlur = 10
+        chart.ctx.shadowOffsetY = 5
+      },
+      afterDatasetsDraw(chart) {
+        chart.ctx.restore()
+      },
+    }
+
+    const centerTotal = {
+      id: 'centerTotalCustomerNature',
+      afterDraw(chart) {
+        const { ctx: c, chartArea } = chart
+        const cx = (chartArea.left + chartArea.right) / 2
+        const cy = (chartArea.top + chartArea.bottom) / 2
+        c.save()
+        c.textAlign = 'center'
+        c.textBaseline = 'middle'
+        c.fillStyle = '#8a94a6'
+        c.font = '10px sans-serif'
+        c.fillText('TOTAL', cx, cy - 10)
+        c.fillStyle = '#e2e8f0'
+        c.font = 'bold 18px sans-serif'
+        c.fillText(total.toLocaleString('en-US'), cx, cy + 10)
+        c.restore()
+      },
+    }
+
+    chartInstance = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: cats.map(c => natureLabel(c.label)),
+        datasets: [{
+          data: cats.map(c => c.count),
+          backgroundColor: colors,
+          borderColor: '#111a2e',
+          borderWidth: 2,
+          hoverOffset: 10,
+          cutout: '58%',
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'right', labels: { color: '#64748b', font: { size: 11 }, padding: 16 } },
+          tooltip: {
+            callbacks: {
+              label: ctx => ` ${ctx.label}: ${ctx.raw} (${(ctx.raw / total * 100).toFixed(1)}%)`
+            }
+          }
+        },
+        animation: { animateRotate: true, animateScale: true }
+      },
+      plugins: [gradientDonut, centerTotal]
     })
   }
 }
@@ -590,10 +819,25 @@ const params = ref({
   metric:       Object.keys(props.metricFields)[0] ?? 'purchase_order_net_value',
   dimension1:   defaultDim,
   dimension2:   Object.keys(props.dimensionFields)[1] ?? 'product_category',
-  compare_from: '',
-  compare_to:   '',
-  top_n:        50,
+  top_n:        300,
+  dim1_items:   [], // Matrix / Two Factors Trend: specific row/Factor 1 items, or [] = automatic Top N + Others
+  dim2_items:   [], // Matrix / Two Factors Trend: specific column/Factor 2 items, or [] = automatic Top N + Others
 })
+
+// ── Period Comparison: 2-5 periods ──
+const periodsCount = ref(2)
+const extraPeriods = ref([{ from: '', to: '' }]) // periodsCount - 1 entries
+
+watch(periodsCount, (n) => {
+  const needed = n - 1
+  while (extraPeriods.value.length < needed) extraPeriods.value.push({ from: '', to: '' })
+  while (extraPeriods.value.length > needed) extraPeriods.value.pop()
+})
+
+const allPeriods = computed(() => [
+  { from: params.value.date_from, to: params.value.date_to },
+  ...extraPeriods.value,
+])
 
 const showPeriodSelector = computed(() => ['trend','two_factors_trend'].includes(params.value.report_type))
 const showDimension1     = computed(() => ['single_dimension','matrix','ranking','period_comparison','two_factors_trend'].includes(params.value.report_type))
@@ -602,10 +846,19 @@ const dimension1Label    = computed(() => ({ matrix:'Dimension 1 (Rows)', two_fa
 const dimension2Label    = computed(() => ({ matrix:'Dimension 2 (Columns)', two_factors_trend:'Factor 2 (Sub Rows)' }[params.value.report_type] ?? 'Dimension 2'))
 const resultTitle        = computed(() => props.reportTypes.find(r => r.key === params.value.report_type)?.label ?? 'Report Results')
 
+// ── Build the payload actually sent to the backend ──
+function buildPayload() {
+  const payload = { ...params.value }
+  if (params.value.report_type === 'period_comparison') {
+    payload.periods = allPeriods.value
+  }
+  return payload
+}
+
 async function runReport() {
   running.value = true; result.value = null; expanded.value = new Set()
   try {
-    const { data } = await axios.post(route('export-sales.run-report', props.company.id), params.value)
+    const { data } = await axios.post(route('export-sales.run-report', props.company.id), buildPayload())
     result.value = data
   } catch(e) { console.error(e) } finally { running.value = false }
 }
@@ -613,7 +866,7 @@ async function runReport() {
 async function exportToExcel() {
   exporting.value = true
   try {
-    const response = await axios.post(route('export-sales.export-report', props.company.id), params.value, { responseType:'blob' })
+    const response = await axios.post(route('export-sales.export-report', props.company.id), buildPayload(), { responseType:'blob' })
     const blob = new Blob([response.data], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
     const url  = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -629,4 +882,17 @@ function fmt(val) { return (parseFloat(val)||0).toLocaleString('en-US', { minimu
 function getShare(value, rows) { const t = rows.reduce((s,r)=>s+parseFloat(r.value||0),0); return t>0?(parseFloat(value)/t)*100:0 }
 function getTrendChange(rows, i) { const p=parseFloat(rows[i-1]?.value||0), c=parseFloat(rows[i]?.value||0); if(p===0) return null; return parseFloat(((c-p)/p*100).toFixed(2)) }
 function toggleExpand(label) { const s=new Set(expanded.value); s.has(label)?s.delete(label):s.add(label); expanded.value=s }
+
+function natureBg(label) {
+  const map = { new: 'bg-mp-success/20 border-mp-success', repeating: 'bg-mp-success/20 border-mp-success', active: 'bg-mp-success/20 border-mp-success', stop: 'bg-mp-warning/30 border-mp-warning', dead: 'bg-mp-danger/30 border-mp-danger', stop_reactivated: 'bg-mp-gold/30 border-mp-gold', dead_reactivated: 'bg-purple-500/20 border-purple-500' }
+  return map[label] || 'bg-mp-card-hover border-mp-border'
+}
+function natureText(label) {
+  const map = { new: 'text-mp-success', repeating: 'text-mp-success', active: 'text-mp-success', stop: 'text-mp-warning', dead: 'text-mp-danger', stop_reactivated: 'text-white', dead_reactivated: 'text-purple-400' }
+  return map[label] || 'text-mp-muted'
+}
+function natureLabel(label) {
+  const map = { new: 'New Customers', repeating: 'Repeating', active: 'Active (3+ yrs)', stop: 'Stop', dead: 'Dead', stop_reactivated: 'Stop Reactivated', dead_reactivated: 'Dead Reactivated' }
+  return map[label] || label
+}
 </script>

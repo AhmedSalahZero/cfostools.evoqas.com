@@ -73,6 +73,25 @@ class ExportSalesAnalysisController extends Controller
         'full_container_load_count',
     ];
 
+    // Price Per Unit isn't meaningfully additive across rows — summing it
+    // produces a number with no real meaning, so it's quantity-weighted
+    // instead (total value ÷ total units) everywhere it's used.
+    private const NON_ADDITIVE_METRICS = ['price_per_unit'];
+
+    private function aggFunc(string $metric): string
+    {
+        return in_array($metric, self::NON_ADDITIVE_METRICS) ? 'AVG' : 'SUM';
+    }
+
+    // Returns the full SQL expression to compute a metric's value.
+    private function metricExpr(string $metric): string
+    {
+        if ($metric === 'price_per_unit') {
+            return "SUM(`price_per_unit` * `quantity`) / NULLIF(SUM(`quantity`), 0)";
+        }
+        return "{$this->aggFunc($metric)}(`$metric`)";
+    }
+
     private const NON_DIMENSION_FIELDS = [
         'quantity', 'packing_quantity', 'price_per_unit',
         'purchase_order_value', 'purchase_order_net_value', 'freight_value',
@@ -113,6 +132,40 @@ class ExportSalesAnalysisController extends Controller
             'annually'     => ["DATE_FORMAT(`date`, '%Y')", "YEAR(`date`)"],
             default        => ["DATE_FORMAT(`date`, '%Y-%b')", "DATE_FORMAT(`date`, '%Y%m') + 0"],
         };
+    }
+
+    // Decode a JSON-encoded array of {from, to} period ranges (2-5 of them).
+    // Falls back to date_from/date_to + compare_from/compare_to if "periods"
+    // wasn't sent (older clients).
+    private function decodePeriods($raw, $request): array
+    {
+        $periods = [];
+        $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+        if (is_array($decoded)) {
+            foreach ($decoded as $p) {
+                if (!empty($p['from']) && !empty($p['to'])) {
+                    $periods[] = ['from' => $p['from'], 'to' => $p['to']];
+                }
+            }
+        }
+        if (count($periods) < 2) {
+            $periods = [
+                ['from' => $request->date_from, 'to' => $request->date_to],
+                ['from' => $request->compare_from ?? $request->date_from, 'to' => $request->compare_to ?? $request->date_to],
+            ];
+        }
+        return array_slice($periods, 0, 5);
+    }
+
+    // Decode a JSON-encoded array of specific item names hand-picked by the
+    // user. Returns [] when nothing was picked (default automatic behavior).
+    private function decodeSelectedItems($raw): array
+    {
+        if (!$raw) return [];
+        $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+        return is_array($decoded)
+            ? array_values(array_filter($decoded, fn($v) => $v !== null && $v !== ''))
+            : [];
     }
 
     // ── Field Mapping ────────────────────────────────────────────────────
@@ -265,14 +318,18 @@ class ExportSalesAnalysisController extends Controller
     {
         $this->authorizeExportSalesCompany($companyId);
         $request->validate([
-            'report_type' => ['required', 'string'],
-            'date_from'   => ['required', 'date'],
-            'date_to'     => ['required', 'date'],
-            'period'      => ['nullable', 'in:monthly,quarterly,semi_annually,annually'],
-            'dimension1'  => ['nullable', 'string'],
-            'dimension2'  => ['nullable', 'string'],
-            'metric'      => ['nullable', 'string'],
-            'top_n'       => ['nullable', 'integer', 'min:1', 'max:500'],
+            'report_type'   => ['required', 'string'],
+            'date_from'     => ['required', 'date'],
+            'date_to'       => ['required', 'date'],
+            'period'        => ['nullable', 'in:monthly,quarterly,semi_annually,annually'],
+            'dimension1'    => ['nullable', 'string'],
+            'dimension2'    => ['nullable', 'string'],
+            'metric'        => ['nullable', 'string'],
+            'top_n'         => ['nullable', 'integer', 'min:1', 'max:500'],
+            'periods'       => ['nullable'],
+            'selected_items'=> ['nullable'],
+            'dim1_items'    => ['nullable'],
+            'dim2_items'    => ['nullable'],
         ]);
 
         $query = ExportSalesData::where('portfolio_company_id', $companyId)
@@ -282,6 +339,7 @@ class ExportSalesAnalysisController extends Controller
             'single_dimension'  => $this->runSingleDimension($query, $request),
             'matrix'            => $this->runMatrix($query, $request),
             'ranking'           => $this->runRanking($query, $request),
+            'customer_nature'   => $this->runCustomerNature($companyId, $request),
             'period_comparison' => $this->runPeriodComparison($companyId, $request),
             'trend'             => $this->runTrend($query, $request),
             'two_factors_trend' => $this->runTwoFactorsTrend($query, $request),
@@ -298,14 +356,18 @@ class ExportSalesAnalysisController extends Controller
     {
         $this->authorizeExportSalesCompany($companyId);
         $request->validate([
-            'report_type' => ['required', 'string'],
-            'date_from'   => ['required', 'date'],
-            'date_to'     => ['required', 'date'],
-            'period'      => ['nullable', 'in:monthly,quarterly,semi_annually,annually'],
-            'dimension1'  => ['nullable', 'string'],
-            'dimension2'  => ['nullable', 'string'],
-            'metric'      => ['nullable', 'string'],
-            'top_n'       => ['nullable', 'integer', 'min:1', 'max:500'],
+            'report_type'   => ['required', 'string'],
+            'date_from'     => ['required', 'date'],
+            'date_to'       => ['required', 'date'],
+            'period'        => ['nullable', 'in:monthly,quarterly,semi_annually,annually'],
+            'dimension1'    => ['nullable', 'string'],
+            'dimension2'    => ['nullable', 'string'],
+            'metric'        => ['nullable', 'string'],
+            'top_n'         => ['nullable', 'integer', 'min:1', 'max:500'],
+            'periods'       => ['nullable'],
+            'selected_items'=> ['nullable'],
+            'dim1_items'    => ['nullable'],
+            'dim2_items'    => ['nullable'],
         ]);
 
         $company = PortfolioCompany::findOrFail($companyId);
@@ -317,6 +379,7 @@ class ExportSalesAnalysisController extends Controller
             'single_dimension'  => $this->runSingleDimension($query, $request),
             'matrix'            => $this->runMatrix($query, $request),
             'ranking'           => $this->runRanking($query, $request),
+            'customer_nature'   => $this->runCustomerNature($companyId, $request),
             'period_comparison' => $this->runPeriodComparison($companyId, $request),
             'trend'             => $this->runTrend($query, $request),
             'two_factors_trend' => $this->runTwoFactorsTrend($query, $request),
@@ -416,6 +479,92 @@ class ExportSalesAnalysisController extends Controller
                 $row++;
             }
             foreach (['A','B','C','D'] as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
+
+        } elseif (($result['type'] ?? '') === 'period_comparison') {
+            $periods = collect($result['periods']);
+            $headers = ['Label'];
+            foreach ($periods as $i => $p) {
+                $headers[] = 'Period ' . ($i + 1) . ' (' . $p['from'] . ' → ' . $p['to'] . ')';
+                if ($i > 0) $headers[] = 'Change %';
+            }
+            $sheet->fromArray($headers, null, "A$row");
+            $maxCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
+            $sheet->getStyle("A$row:{$maxCol}$row")->applyFromArray($headerStyle);
+            $row++;
+            foreach (collect($result['rows']) as $i => $r) {
+                $rowData = [$r['label'] . (!empty($r['is_other']) ? ' (' . $r['other_count'] . ' items)' : '')];
+                foreach ($periods as $pi => $p) {
+                    $rowData[] = floatval($r['values'][$pi] ?? 0);
+                    if ($pi > 0) {
+                        $chg = $r['changes'][$pi] ?? null;
+                        $rowData[] = $chg !== null ? $chg . '%' : 'N/A';
+                    }
+                }
+                $sheet->fromArray($rowData, null, "A$row");
+                if ($i % 2 === 1) $sheet->getStyle("A$row:{$maxCol}$row")->applyFromArray($altStyle);
+                $row++;
+            }
+            for ($ci = 1; $ci <= count($headers); $ci++) $sheet->getColumnDimensionByColumn($ci)->setAutoSize(true);
+
+        } elseif (($result['type'] ?? '') === 'two_factors_trend') {
+            $periods = $result['periods'];
+            $headers = array_merge(["{$metricLabel} by " . (self::FIELDS[$result['dim1']] ?? $result['dim1']) . ' / ' . (self::FIELDS[$result['dim2']] ?? $result['dim2'])], $periods->toArray(), ['Total']);
+            $sheet->fromArray($headers, null, "A$row");
+            $maxCol = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($headers));
+            $sheet->getStyle("A$row:{$maxCol}$row")->applyFromArray($headerStyle);
+            $row++;
+            foreach ($result['rows'] as $parent) {
+                $parentLabel = $parent['label'] . (!empty($parent['is_other']) ? ' (' . $parent['other_count'] . ' items)' : '');
+                $parentData = [$parentLabel];
+                foreach ($periods as $p) $parentData[] = $parent['cells'][$p]['value'] ?? 0;
+                $parentData[] = $parent['total'];
+                $sheet->fromArray($parentData, null, "A$row");
+                $sheet->getStyle("A$row:{$maxCol}$row")->applyFromArray([
+                    'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1e40af']],
+                ]);
+                $row++;
+                foreach ($parent['children'] as $child) {
+                    $childLabel = '  ' . $child['label'] . (!empty($child['is_other']) ? ' (' . $child['other_count'] . ' items)' : '');
+                    $childData = [$childLabel];
+                    foreach ($periods as $p) $childData[] = $child['cells'][$p]['value'] ?? 0;
+                    $childData[] = $child['total'];
+                    $sheet->fromArray($childData, null, "A$row");
+                    $row++;
+                }
+            }
+            for ($ci = 1; $ci <= count($headers); $ci++) $sheet->getColumnDimensionByColumn($ci)->setAutoSize(true);
+
+        } elseif (($result['type'] ?? '') === 'customer_nature') {
+            $sheet->fromArray(['Customer Category', 'Count', 'Total Value'], null, "A$row");
+            $sheet->getStyle("A$row:C$row")->applyFromArray($headerStyle);
+            $row++;
+            $catLabels = [
+                'new' => 'New Customers', 'repeating' => 'Repeating',
+                'active' => 'Active (3+ yrs)', 'stop' => 'Stop',
+                'dead' => 'Dead', 'stop_reactivated' => 'Stop Reactivated',
+                'dead_reactivated' => 'Dead Reactivated',
+            ];
+            foreach ($result['categories'] as $cat) {
+                $sheet->fromArray([$catLabels[$cat['label']] ?? $cat['label'], $cat['count'], floatval($cat['total_sales'])], null, "A$row");
+                $sheet->getStyle("C$row")->getNumberFormat()->setFormatCode($numFmt);
+                $row++;
+            }
+            foreach ($result['categories'] as $cat) {
+                if (empty($cat['customers'])) continue;
+                $catLabel = $catLabels[$cat['label']] ?? $cat['label'];
+                $detailSheet = $spreadsheet->createSheet();
+                $detailSheet->setTitle(substr($catLabel, 0, 31));
+                $detailSheet->fromArray(['Customer Name', 'Value', '% of Total'], null, 'A1');
+                $detailSheet->getStyle('A1:C1')->applyFromArray($headerStyle);
+                foreach ($cat['customers'] as $i => $c) {
+                    $detailSheet->fromArray([$c['name'], floatval($c['sales']), $c['percentage'] . '%'], null, 'A' . ($i + 2));
+                    $detailSheet->getStyle('B' . ($i + 2))->getNumberFormat()->setFormatCode($numFmt);
+                }
+                foreach (['A','B','C'] as $col) $detailSheet->getColumnDimension($col)->setAutoSize(true);
+            }
+            $spreadsheet->setActiveSheetIndex(0);
+            foreach (['A','B','C'] as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
         }
 
         $sheet->setTitle(substr($reportLabel, 0, 31));
@@ -437,40 +586,115 @@ class ExportSalesAnalysisController extends Controller
     {
         $dimension = $request->dimension1 ?? 'destination_country';
         $metric    = $request->metric ?? 'purchase_order_net_value';
-        $topN      = $request->top_n ?? 50;
+        $limit     = (int) ($request->top_n ?? 300);
 
-        $rows = $query->whereNotNull($dimension)->where($dimension, '!=', '')
-            ->selectRaw("`$dimension` as label, SUM(`$metric`) as value, COUNT(*) as transactions")
-            ->groupBy($dimension)->orderByDesc('value')->limit($topN)->get();
+        $selected = $this->decodeSelectedItems($request->selected_items ?? null);
 
-        return ['type' => 'single_dimension', 'dimension' => $dimension, 'metric' => $metric, 'rows' => $rows];
+        $q = $query->whereNotNull($dimension)->where($dimension, '!=', '');
+        if (!empty($selected)) {
+            $q->whereIn($dimension, $selected);
+        }
+
+        $rows = $q->selectRaw("`$dimension` as label, {$this->metricExpr($metric)} as value, COUNT(*) as transactions")
+            ->groupBy($dimension)->orderByDesc('value')->get();
+
+        if (empty($selected) && $rows->count() > $limit) {
+            $top  = $rows->take($limit);
+            $rest = $rows->slice($limit);
+            $result = $top->map(fn($r) => [
+                'label' => $r->label, 'value' => (float) $r->value, 'transactions' => (int) $r->transactions,
+            ])->values();
+            $result->push([
+                'label'       => 'Others',
+                'value'       => (float) $rest->sum('value'),
+                'transactions'=> (int) $rest->sum('transactions'),
+                'is_other'    => true,
+                'other_count' => $rest->count(),
+            ]);
+        } else {
+            $result = $rows->map(fn($r) => [
+                'label' => $r->label, 'value' => (float) $r->value, 'transactions' => (int) $r->transactions,
+            ])->values();
+        }
+
+        return ['type' => 'single_dimension', 'dimension' => $dimension, 'metric' => $metric, 'rows' => $result];
     }
 
     private function runMatrix($query, $request)
     {
-        $dim1   = $request->dimension1 ?? 'destination_country';
-        $dim2   = $request->dimension2 ?? 'product_category';
-        $metric = $request->metric ?? 'purchase_order_net_value';
+        $dim1      = $request->dimension1 ?? 'destination_country';
+        $dim2      = $request->dimension2 ?? 'product_category';
+        $metric    = $request->metric ?? 'purchase_order_net_value';
+        $dim1Limit = 300; // rows scroll vertically — can afford many
+        $dim2Limit = 20;  // columns force horizontal scroll — keep tight
 
-        $rows = $query->whereNotNull($dim1)->whereNotNull($dim2)
-            ->where($dim1, '!=', '')->where($dim2, '!=', '')
-            ->selectRaw("`$dim1` as dim1, `$dim2` as dim2, SUM(`$metric`) as value")
-            ->groupBy($dim1, $dim2)->orderBy($dim1)->orderBy($dim2)->get();
+        $dim1Selected = $this->decodeSelectedItems($request->dim1_items ?? null);
+        $dim2Selected = $this->decodeSelectedItems($request->dim2_items ?? null);
 
-        $dim1Values = $rows->pluck('dim1')->unique()->values();
-        $dim2Values = $rows->pluck('dim2')->unique()->sort()->values();
+        $query->whereNotNull($dim1)->whereNotNull($dim2)
+              ->where($dim1, '!=', '')->where($dim2, '!=', '');
+        if (!empty($dim1Selected)) $query->whereIn($dim1, $dim1Selected);
+        if (!empty($dim2Selected)) $query->whereIn($dim2, $dim2Selected);
+
+        $rows = $query->selectRaw("`$dim1` as dim1, `$dim2` as dim2, {$this->metricExpr($metric)} as value")
+            ->groupBy($dim1, $dim2)->get();
+
+        $dim1Totals = [];
+        $dim2Totals = [];
+        foreach ($rows as $r) {
+            $dim1Totals[$r->dim1] = ($dim1Totals[$r->dim1] ?? 0) + (float) $r->value;
+            $dim2Totals[$r->dim2] = ($dim2Totals[$r->dim2] ?? 0) + (float) $r->value;
+        }
+        arsort($dim1Totals);
+        arsort($dim2Totals);
+        $dim1Keys = array_keys($dim1Totals);
+        $dim2Keys = array_keys($dim2Totals);
+
+        $dim1Other = [];
+        if (empty($dim1Selected) && count($dim1Keys) > $dim1Limit) {
+            $dim1Other = array_slice($dim1Keys, $dim1Limit);
+            $dim1Keys  = array_slice($dim1Keys, 0, $dim1Limit);
+        }
+        $dim2Other = [];
+        if (empty($dim2Selected) && count($dim2Keys) > $dim2Limit) {
+            $dim2Other = array_slice($dim2Keys, $dim2Limit);
+            $dim2Keys  = array_slice($dim2Keys, 0, $dim2Limit);
+        }
+
+        $dim1OtherLabel = !empty($dim1Other) ? 'Others (' . count($dim1Other) . ' items)' : null;
+        $dim2OtherLabel = !empty($dim2Other) ? 'Others (' . count($dim2Other) . ' items)' : null;
+        $dim1OtherSet   = array_flip($dim1Other);
+        $dim2OtherSet   = array_flip($dim2Other);
+
+        $grid = [];
+        foreach ($rows as $r) {
+            $b1 = $dim1OtherLabel && isset($dim1OtherSet[$r->dim1]) ? $dim1OtherLabel : $r->dim1;
+            $b2 = $dim2OtherLabel && isset($dim2OtherSet[$r->dim2]) ? $dim2OtherLabel : $r->dim2;
+            $grid[$b1][$b2] = ($grid[$b1][$b2] ?? 0) + (float) $r->value;
+        }
+
+        $rowOrder = $dim1Keys;
+        if ($dim1OtherLabel) $rowOrder[] = $dim1OtherLabel;
+        $colOrder = $dim2Keys;
+        if ($dim2OtherLabel) $colOrder[] = $dim2OtherLabel;
 
         $matrix = [];
-        foreach ($dim1Values as $d1) {
+        foreach ($rowOrder as $d1) {
             $row = ['label' => $d1];
-            foreach ($dim2Values as $d2) {
-                $found    = $rows->first(fn($r) => $r->dim1 === $d1 && $r->dim2 === $d2);
-                $row[$d2] = $found ? (float)$found->value : 0;
+            foreach ($colOrder as $d2) {
+                $row[$d2] = $grid[$d1][$d2] ?? 0;
             }
             $matrix[] = $row;
         }
 
-        return ['type' => 'matrix', 'dim1' => $dim1, 'dim2' => $dim2, 'metric' => $metric, 'columns' => $dim2Values, 'rows' => $matrix];
+        return [
+            'type'    => 'matrix',
+            'dim1'    => $dim1,
+            'dim2'    => $dim2,
+            'metric'  => $metric,
+            'columns' => collect($colOrder),
+            'rows'    => $matrix,
+        ];
     }
 
     private function runRanking($query, $request)
@@ -480,7 +704,7 @@ class ExportSalesAnalysisController extends Controller
 
         $data = $query->whereNotNull('destination_country')->whereNotNull($dim)
             ->where('destination_country', '!=', '')->where($dim, '!=', '')
-            ->selectRaw("`destination_country` as branch, `$dim` as product_dim, SUM(`$metric`) as value")
+            ->selectRaw("`destination_country` as branch, `$dim` as product_dim, {$this->metricExpr($metric)} as value")
             ->groupBy('destination_country', $dim)->get();
 
         $branches = $data->pluck('branch')->unique()->sort()->values();
@@ -514,33 +738,82 @@ class ExportSalesAnalysisController extends Controller
     {
         $metric = $request->metric ?? 'purchase_order_net_value';
         $dim    = $request->dimension1 ?? 'destination_country';
+        $limit  = 300;
 
-        $period1 = ExportSalesData::where('portfolio_company_id', $companyId)
-            ->whereBetween('date', [$request->date_from, $request->date_to])
-            ->whereNotNull($dim)->where($dim, '!=', '')
-            ->selectRaw("`$dim` as label, SUM(`$metric`) as value")
-            ->groupBy($dim)->get()->keyBy('label');
+        $periods  = $this->decodePeriods($request->periods ?? null, $request);
+        $selected = $this->decodeSelectedItems($request->selected_items ?? null);
+        $lastIdx  = count($periods) - 1;
 
-        $period2 = ExportSalesData::where('portfolio_company_id', $companyId)
-            ->whereBetween('date', [$request->compare_from, $request->compare_to])
-            ->whereNotNull($dim)->where($dim, '!=', '')
-            ->selectRaw("`$dim` as label, SUM(`$metric`) as value")
-            ->groupBy($dim)->get()->keyBy('label');
+        $perPeriodData = [];
+        foreach ($periods as $i => $p) {
+            $q = ExportSalesData::where('portfolio_company_id', $companyId)
+                ->whereBetween('date', [$p['from'], $p['to']])
+                ->whereNotNull($dim)->where($dim, '!=', '');
+            if (!empty($selected)) {
+                $q->whereIn($dim, $selected);
+            }
+            $perPeriodData[$i] = $q->selectRaw("`$dim` as label, {$this->metricExpr($metric)} as value")
+                ->groupBy($dim)->get()->keyBy('label');
+        }
 
-        $allLabels = $period1->keys()->merge($period2->keys())->unique()->values();
+        $allLabels = collect();
+        foreach ($perPeriodData as $data) {
+            $allLabels = $allLabels->merge($data->keys());
+        }
+        $allLabels = $allLabels->unique()->values();
 
-        $rows = $allLabels->map(function ($label) use ($period1, $period2) {
-            $v1 = (float)($period1[$label]->value ?? 0);
-            $v2 = (float)($period2[$label]->value ?? 0);
-            return ['label' => $label, 'period1' => $v1, 'period2' => $v2, 'change' => $v1 > 0 ? round(($v2 - $v1) / $v1 * 100, 2) : null];
+        $rows = $allLabels->map(function ($label) use ($perPeriodData, $lastIdx) {
+            $values = [];
+            foreach ($perPeriodData as $i => $data) {
+                $values[$i] = (float) ($data[$label]->value ?? 0);
+            }
+            $changes = [];
+            foreach ($values as $i => $v) {
+                if ($i === 0) { $changes[$i] = null; continue; }
+                $prev = $values[$i - 1];
+                $changes[$i] = $prev > 0 ? round(($v - $prev) / $prev * 100, 2) : null;
+            }
+            return [
+                'label'      => $label,
+                'values'     => $values,
+                'changes'    => $changes,
+                'sort_value' => $values[$lastIdx],
+            ];
         });
 
+        $rows = $rows->sortByDesc('sort_value')->values();
+
+        if (empty($selected) && $rows->count() > $limit) {
+            $top  = $rows->take($limit);
+            $rest = $rows->slice($limit);
+
+            $otherValues = [];
+            foreach ($periods as $i => $p) {
+                $otherValues[$i] = $rest->sum(fn($r) => $r['values'][$i]);
+            }
+            $otherChanges = [];
+            foreach ($otherValues as $i => $v) {
+                if ($i === 0) { $otherChanges[$i] = null; continue; }
+                $prev = $otherValues[$i - 1];
+                $otherChanges[$i] = $prev > 0 ? round(($v - $prev) / $prev * 100, 2) : null;
+            }
+
+            $rows = $top->values();
+            $rows->push([
+                'label'       => 'Others',
+                'values'      => $otherValues,
+                'changes'     => $otherChanges,
+                'is_other'    => true,
+                'other_count' => $rest->count(),
+            ]);
+        }
+
         return [
-            'type'    => 'period_comparison',
-            'period1' => ['from' => $request->date_from, 'to' => $request->date_to],
-            'period2' => ['from' => $request->compare_from, 'to' => $request->compare_to],
-            'metric'  => $metric,
-            'rows'    => $rows,
+            'type'      => 'period_comparison',
+            'periods'   => collect($periods)->map(fn($p, $i) => ['index' => $i, 'from' => $p['from'], 'to' => $p['to']])->values(),
+            'dimension' => $dim,
+            'metric'    => $metric,
+            'rows'      => $rows,
         ];
     }
 
@@ -550,7 +823,7 @@ class ExportSalesAnalysisController extends Controller
         $period = $request->period ?? 'monthly';
         [$labelExpr, $sortExpr] = $this->getPeriodExpressions($period);
 
-        $rows = $query->selectRaw("$labelExpr as period_label, $sortExpr as sort_key, SUM(`$metric`) as value")
+        $rows = $query->selectRaw("$labelExpr as period_label, $sortExpr as sort_key, {$this->metricExpr($metric)} as value")
             ->groupBy('period_label', 'sort_key')->orderBy('sort_key')->get()
             ->map(fn($r) => ['period' => $r->period_label, 'value' => (float)$r->value])->values()->toArray();
 
@@ -563,56 +836,237 @@ class ExportSalesAnalysisController extends Controller
         $dim2   = $request->dimension2 ?? 'product_category';
         $metric = $request->metric ?? 'purchase_order_net_value';
         $period = $request->period ?? 'monthly';
+        $limit  = 300;
 
         [$labelExpr, $sortExpr] = $this->getPeriodExpressions($period);
 
+        $dim1Selected = $this->decodeSelectedItems($request->dim1_items ?? null);
+        $dim2Selected = $this->decodeSelectedItems($request->dim2_items ?? null);
+
+        $query->whereNotNull($dim1)->where($dim1, '!=', '')
+              ->whereNotNull($dim2)->where($dim2, '!=', '');
+        if (!empty($dim1Selected)) $query->whereIn($dim1, $dim1Selected);
+        if (!empty($dim2Selected)) $query->whereIn($dim2, $dim2Selected);
+
         $data = $query
-            ->whereNotNull($dim1)->where($dim1, '!=', '')
-            ->whereNotNull($dim2)->where($dim2, '!=', '')
-            ->selectRaw("`$dim1` as dim1, `$dim2` as dim2, $labelExpr as period_label, $sortExpr as sort_key, SUM(`$metric`) as value")
+            ->selectRaw("`$dim1` as dim1, `$dim2` as dim2, $labelExpr as period_label, $sortExpr as sort_key, {$this->metricExpr($metric)} as value")
             ->groupBy('dim1', 'dim2', 'period_label', 'sort_key')
-            ->orderBy('dim1')->orderBy('dim2')->orderBy('sort_key')->get();
+            ->get();
 
         $periods = $data->sortBy('sort_key')->pluck('period_label')->unique()->values();
 
-        $grouped = [];
+        // dim1 totals, used to rank (largest → smallest) and to decide
+        // which categories fold into "Others" (Top 300 overall). dim2 is
+        // intentionally NOT capped here — that's applied per-category below.
+        $dim1Totals = [];
+        $grouped    = [];
         foreach ($data as $row) {
-            $grouped[$row->dim1][$row->dim2][$row->period_label] = (float)$row->value;
+            $dim1Totals[$row->dim1] = ($dim1Totals[$row->dim1] ?? 0) + (float) $row->value;
+            $grouped[$row->dim1][$row->dim2][$row->period_label] =
+                ($grouped[$row->dim1][$row->dim2][$row->period_label] ?? 0) + (float) $row->value;
+        }
+        arsort($dim1Totals);
+
+        $dim1Keys = array_keys($dim1Totals);
+
+        $dim1Other = [];
+        if (empty($dim1Selected) && count($dim1Keys) > $limit) {
+            $dim1Other = array_slice($dim1Keys, $limit);
+            $dim1Keys  = array_slice($dim1Keys, 0, $limit);
         }
 
+        $buildCells = function (array $periodValues) use ($periods) {
+            $cells = [];
+            $prev  = null;
+            foreach ($periods as $p) {
+                $val       = $periodValues[$p] ?? 0;
+                $gr        = ($prev !== null && $prev > 0) ? round(($val - $prev) / $prev * 100, 1) : 0;
+                $cells[$p] = ['value' => $val, 'gr' => $gr];
+                $prev      = $val;
+            }
+            return $cells;
+        };
+
         $resultRows = [];
-        foreach ($grouped as $d1 => $dim2Groups) {
-            $subRows = [];
+        foreach ($dim1Keys as $d1) {
+            $dim2Groups = $grouped[$d1] ?? [];
+
+            // Rank & cap Factor 2 items WITHIN this category only.
+            $d2Totals = [];
             foreach ($dim2Groups as $d2 => $periodData) {
-                $cells = [];
-                $prev  = null;
-                foreach ($periods as $p) {
-                    $val       = $periodData[$p] ?? 0;
-                    $gr        = ($prev !== null && $prev > 0) ? round(($val - $prev) / $prev * 100, 1) : 0;
-                    $cells[$p] = ['value' => $val, 'gr' => $gr];
-                    $prev      = $val;
+                $d2Totals[$d2] = array_sum($periodData);
+            }
+            arsort($d2Totals);
+            $d2Keys = array_keys($d2Totals);
+
+            $d2Other = [];
+            if (empty($dim2Selected) && count($d2Keys) > $limit) {
+                $d2Other = array_slice($d2Keys, $limit);
+                $d2Keys  = array_slice($d2Keys, 0, $limit);
+            }
+            $d2OtherSet = array_flip($d2Other);
+
+            $childRows        = [];
+            $otherChildTotals = [];
+            $otherChildCount  = 0;
+            foreach ($dim2Groups as $d2 => $periodData) {
+                if (isset($d2OtherSet[$d2])) {
+                    $otherChildCount++;
+                    foreach ($periodData as $p => $v) {
+                        $otherChildTotals[$p] = ($otherChildTotals[$p] ?? 0) + $v;
+                    }
+                    continue;
                 }
-                $subRows[] = ['label' => $d2, 'cells' => $cells, 'total' => array_sum(array_column($cells, 'value'))];
+                $cells = $buildCells($periodData);
+                $childRows[] = [
+                    'label' => $d2,
+                    'cells' => $cells,
+                    'total' => array_sum(array_column($cells, 'value')),
+                ];
+            }
+            usort($childRows, fn($a, $b) => $b['total'] <=> $a['total']);
+
+            if (!empty($otherChildTotals)) {
+                $cells = $buildCells($otherChildTotals);
+                $childRows[] = [
+                    'label'       => 'Others',
+                    'cells'       => $cells,
+                    'total'       => array_sum(array_column($cells, 'value')),
+                    'is_other'    => true,
+                    'other_count' => $otherChildCount,
+                ];
             }
 
-            $parentCells = [];
-            $prev = null;
-            foreach ($periods as $p) {
-                $val              = collect($dim2Groups)->sum(fn($d) => $d[$p] ?? 0);
-                $gr               = ($prev !== null && $prev > 0) ? round(($val - $prev) / $prev * 100, 1) : 0;
-                $parentCells[$p]  = ['value' => $val, 'gr' => $gr];
-                $prev             = $val;
+            $parentPeriodTotals = [];
+            foreach ($dim2Groups as $periodData) {
+                foreach ($periodData as $p => $v) {
+                    $parentPeriodTotals[$p] = ($parentPeriodTotals[$p] ?? 0) + $v;
+                }
             }
+            $parentCells = $buildCells($parentPeriodTotals);
 
             $resultRows[] = [
                 'label'    => $d1,
                 'cells'    => $parentCells,
                 'total'    => array_sum(array_column($parentCells, 'value')),
-                'children' => $subRows,
+                'children' => $childRows,
+            ];
+        }
+
+        // A single "Others" parent row combining every dim1 item beyond Top 300.
+        if (!empty($dim1Other)) {
+            $otherParentTotals = [];
+            foreach ($dim1Other as $d1) {
+                foreach ($grouped[$d1] ?? [] as $periodData) {
+                    foreach ($periodData as $p => $v) {
+                        $otherParentTotals[$p] = ($otherParentTotals[$p] ?? 0) + $v;
+                    }
+                }
+            }
+            $cells = $buildCells($otherParentTotals);
+            $resultRows[] = [
+                'label'       => 'Others',
+                'cells'       => $cells,
+                'total'       => array_sum(array_column($cells, 'value')),
+                'children'    => [],
+                'is_other'    => true,
+                'other_count' => count($dim1Other),
             ];
         }
 
         return ['type' => 'two_factors_trend', 'dim1' => $dim1, 'dim2' => $dim2, 'metric' => $metric, 'period' => $period, 'periods' => $periods, 'rows' => $resultRows];
+    }
+
+    // ── Customer Nature ──────────────────────────────────────────────────
+
+    private function runCustomerNature($companyId, $request)
+    {
+        $currentYear = (int) date('Y', strtotime($request->date_to));
+        $metric      = $request->metric ?? 'purchase_order_net_value';
+
+        // Y, Y-1, Y-2, Y-3, Y-4 — need back to Y-4 because "Repeating" checks
+        // whether Y-1 was itself that customer's New year (looks back 3
+        // years from Y-1, i.e. as far as Y-4).
+        $years = [];
+        for ($i = 0; $i <= 4; $i++) {
+            $y = $currentYear - $i;
+            $years[$i] = ExportSalesData::where('portfolio_company_id', $companyId)
+                ->whereYear('date', $y)->whereNotNull('customer_name')
+                ->pluck('customer_name')->unique();
+        }
+        [$setY, $setY1, $setY2, $setY3, $setY4] = $years;
+
+        $buckets = [
+            'new'              => $setY->diff($setY1)->diff($setY2)->diff($setY3)->values(),
+            'repeating'        => $setY->intersect($setY1)->diff($setY2)->diff($setY3)->diff($setY4)->values(),
+            'active'           => $setY->intersect($setY1)->intersect($setY2)->values(),
+            'stop'             => $setY1->diff($setY)->values(),
+            'dead'             => $setY2->diff($setY1)->diff($setY)->values(),
+            'stop_reactivated' => $setY->intersect($setY2)->diff($setY1)->values(),
+            'dead_reactivated' => $setY->intersect($setY3)->diff($setY2)->diff($setY1)->values(),
+        ];
+
+        $salesByCustomer = ExportSalesData::where('portfolio_company_id', $companyId)
+            ->whereBetween('date', [$request->date_from, $request->date_to])
+            ->whereNotNull('customer_name')
+            ->where('customer_name', '!=', '')
+            ->selectRaw("customer_name, {$this->metricExpr($metric)} as total_sales")
+            ->groupBy('customer_name')
+            ->get()
+            ->keyBy('customer_name');
+
+        // "Stop" and "Dead" customers have zero sales in the selected
+        // period by definition — show their sales from the last year they
+        // were genuinely active instead, so the user can see how much
+        // revenue is actually being lost.
+        $salesLastYear = ExportSalesData::where('portfolio_company_id', $companyId)
+            ->whereYear('date', $currentYear - 1)
+            ->whereNotNull('customer_name')->where('customer_name', '!=', '')
+            ->selectRaw("customer_name, {$this->metricExpr($metric)} as total_sales")
+            ->groupBy('customer_name')->get()->keyBy('customer_name');
+
+        $salesTwoYearsAgo = ExportSalesData::where('portfolio_company_id', $companyId)
+            ->whereYear('date', $currentYear - 2)
+            ->whereNotNull('customer_name')->where('customer_name', '!=', '')
+            ->selectRaw("customer_name, {$this->metricExpr($metric)} as total_sales")
+            ->groupBy('customer_name')->get()->keyBy('customer_name');
+
+        $pastPeriodSales = ['stop' => $salesLastYear, 'dead' => $salesTwoYearsAgo];
+        $pastPeriodYear  = ['stop' => $currentYear - 1, 'dead' => $currentYear - 2];
+
+        $grandTotal = $salesByCustomer->sum('total_sales');
+
+        $categories = collect($buckets)->map(function ($customers, $key) use ($pastPeriodSales, $pastPeriodYear, $salesByCustomer, $grandTotal) {
+            $isPastPeriod = isset($pastPeriodSales[$key]);
+            $salesMap     = $pastPeriodSales[$key] ?? $salesByCustomer;
+
+            $rows = $customers->map(function ($name) use ($salesMap) {
+                return ['name' => $name, 'sales' => (float) ($salesMap[$name]->total_sales ?? 0)];
+            })->sortByDesc('sales')->values();
+
+            $percentBase = $isPastPeriod ? $rows->sum('sales') : $grandTotal;
+            $rows = $rows->map(function ($r) use ($percentBase) {
+                $r['percentage'] = $percentBase > 0 ? round($r['sales'] / $percentBase * 100, 2) : 0;
+                return $r;
+            });
+
+            return [
+                'label'             => $key,
+                'count'             => $customers->count(),
+                'total_sales'       => $rows->sum('sales'),
+                'is_past_period'    => $isPastPeriod,
+                'sales_period_year' => $isPastPeriod ? $pastPeriodYear[$key] : null,
+                'customers'         => $rows,
+            ];
+        });
+
+        return [
+            'type'        => 'customer_nature',
+            'year'        => $currentYear,
+            'grand_total' => (float) $grandTotal,
+            'metric'      => $metric,
+            'categories'  => $categories,
+        ];
     }
 
     // ── PO Status Summary (export-specific report) ───────────────────────
@@ -625,7 +1079,7 @@ class ExportSalesAnalysisController extends Controller
             ->whereBetween('date', [$request->date_from, $request->date_to])
             ->whereNotNull('purchase_order_status')
             ->where('purchase_order_status', '!=', '')
-            ->selectRaw("purchase_order_status as status, COUNT(*) as count, SUM(`$metric`) as value")
+            ->selectRaw("purchase_order_status as status, COUNT(*) as count, {$this->metricExpr($metric)} as value")
             ->groupBy('purchase_order_status')->orderByDesc('value')->get();
 
         return ['type' => 'po_status', 'metric' => $metric, 'rows' => $rows];
@@ -637,6 +1091,7 @@ class ExportSalesAnalysisController extends Controller
             ['key' => 'single_dimension',  'label' => 'Single Dimension',         'description' => 'Value by one dimension e.g. Destination Country, Product'],
             ['key' => 'matrix',            'label' => 'Matrix (2D)',               'description' => 'Two dimensions cross-tabulated e.g. Country × Product'],
             ['key' => 'ranking',           'label' => 'Country Product Rank',      'description' => 'Ranks destination countries per product'],
+            ['key' => 'customer_nature',   'label' => 'Customer Nature',           'description' => 'New, Repeating, Active, Stop, Dead, Reactivated'],
             ['key' => 'period_comparison', 'label' => 'Period Comparison',         'description' => 'Compare two date ranges side by side'],
             ['key' => 'trend',             'label' => 'Trend Over Time',           'description' => 'Monthly, quarterly or annual value trend'],
             ['key' => 'two_factors_trend', 'label' => 'Two Factors Trend',        'description' => 'e.g. Country vs Product trend with GR% per period'],

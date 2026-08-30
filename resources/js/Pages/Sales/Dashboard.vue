@@ -5,7 +5,7 @@
 
       <!-- ── HEADER ── -->
       <div class="bg-mp-card border-b border-mp-border">
-        <div class="max-w-7xl mx-auto px-1 sm:px-6 lg:px-2 py-3">
+        <div class="max-w-7xl mx-auto px-1 sm:px-3 lg:px-2 py-3">
           <Link :href="`/portfolio-companies/${company.id}`"
             class="flex items-center gap-2 text-sm text-mp-muted hover:text-mp-text-secondary transition-colors mb-3 w-fit">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -13,7 +13,7 @@
             </svg>
             Back to {{ company.name }}
           </Link>
-          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-40">
             <div>
               <h1 class="text-2xl font-bold text-mp-text-secondary">Sales Dashboard</h1>
               <p class="text-mp-muted text-sm mt-0.5">{{ company.name }} — Real-time sales intelligence</p>
@@ -36,15 +36,16 @@
            
               <!-- Reports button -->
               <Link :href="`/companies/${company.id}/sales/reports`"
-                class="flex items-center gap-2 bg-mp-teal hover:bg-mp-teal-dark text-mp-text-secondary text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                class="flex items-center gap-2 bg-mp-card-hover hover:bg-mp-page text-mp-text text-sm font-medium px-4 py-2 rounded-lg border border-mp-border transition-colors">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 Full Reports
               </Link>
+             
               <!-- Profitability button -->
               <Link :href="`/companies/${company.id}/profitability`"
-                class="flex items-center gap-2 bg-mp-success hover:bg-mp-success text-mp-text-secondary text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                class="flex items-center gap-2 bg-mp-card-hover hover:bg-mp-page text-mp-text text-sm font-medium px-4 py-2 rounded-lg border border-mp-border transition-colors">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
                 </svg>
@@ -52,19 +53,12 @@
               </Link>
               <!-- Expense Dashboard -->
               <Link :href="`/companies/${company.id}/expenses`"
-                class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-mp-gold hover:bg-mp-gold-dark text-mp-text-secondary font-medium transition-colors">
+                class="flex items-center gap-2 bg-mp-card-hover hover:bg-mp-page text-mp-text text-sm font-medium px-4 py-2 rounded-lg border border-mp-border transition-colors">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
                 </svg>
                 Expense
               </Link>
-                <!-- <a :href="`/companies/${company.id}/profitability`"
-                class="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm bg-mp-success hover:bg-mp-success text-mp-text-secondary font-medium transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
-                </svg>
-                Profitability
-              </a> -->
               <!-- Upload button -->
               <Link :href="`/companies/${company.id}/sales/upload`"
                 class="flex items-center gap-2 bg-mp-card-hover hover:bg-mp-page border border-mp-border text-mp-text text-sm font-medium px-4 py-2 rounded-lg transition-colors">
@@ -73,13 +67,23 @@
                 </svg>
                 Upload Data
               </Link>
+               <!-- Comparison Dashboard button -->
+              <Link :href="route('comparison-dashboard.index', company.id)"
+                class="flex items-center gap-2 bg-mp-card-hover hover:bg-mp-page text-mp-text text-sm font-medium px-4 py-2 rounded-lg border border-mp-border transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                Comparison Dashboard
+              </Link>
+              <!-- Financial Statement -->
                 <Link :href="`/portfolio-companies/${company.id}/financial-statements`"
-                class="flex items-center gap-2 bg-mp-teal hover:bg-mp-teal-dark text-mp-text-secondary text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                class="flex items-center gap-2 bg-mp-card-hover hover:bg-mp-page text-mp-text text-sm font-medium px-4 py-2 rounded-lg border border-mp-border transition-colors">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 Financial Statements
               </Link>
+
             </div>
           </div>
         </div>
@@ -240,9 +244,7 @@
 
               <!-- Chart view -->
               <div v-if="bd.tab === 'chart'" class="p-6">
-                <div style="height:300px" class="flex items-center justify-center">
-                  <canvas :id="`breakdown-chart-${idx}`"></canvas>
-                </div>
+                <DonutChart3D :data="bd.rows" label-key="label" value-key="value" :height="300" />
               </div>
 
               <!-- Table view -->
@@ -316,7 +318,7 @@
         ═══════════════════════════════════════════ -->
         <div v-if="customerNature">
           <p class="text-xs font-semibold text-white uppercase tracking-widest mb-4">Customer Nature Analysis</p>
-          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
             <div v-for="(cat, key) in customerNature.categories" :key="key"
               :class="natureBg(cat.label)"
               class="rounded-xl border p-4 cursor-pointer hover:opacity-90 transition-opacity"
@@ -692,13 +694,18 @@
               </svg>
             </button>
           </div>
+          <div v-if="naturePopup.is_past_period" class="px-6 py-2.5 bg-mp-warning/20 border-b border-mp-warning/40 text-xs text-mp-warning">
+            These customers had no sales in the selected period — figures shown are from {{ naturePopup.sales_period_year }}, the last year they were active, so you can see the revenue being lost.
+          </div>
           <div class="overflow-y-auto flex-1">
             <table class="w-full text-sm">
               <thead class="sticky top-0 bg-mp-card">
                 <tr class="border-b border-mp-border">
                   <th class="text-left text-xs font-semibold text-white uppercase px-6 py-3">#</th>
                   <th class="text-left text-xs font-semibold text-white uppercase px-6 py-3">Customer Name</th>
-                  <th class="text-right text-xs font-semibold text-white uppercase px-6 py-3">Net Sales</th>
+                  <th class="text-right text-xs font-semibold text-white uppercase px-6 py-3">
+                    {{ naturePopup.is_past_period ? `Sales in ${naturePopup.sales_period_year}` : 'Net Sales' }}
+                  </th>
                   <th class="text-right text-xs font-semibold text-white uppercase px-6 py-3">% of Total</th>
                 </tr>
               </thead>
@@ -723,6 +730,7 @@
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
+import DonutChart3D from '@/Components/DonutChart3D.vue'
 import axios from 'axios'
 
 const props = defineProps({
@@ -754,7 +762,6 @@ const trendChartCanvas = ref(null)
 // Chart.js
 let Chart = null
 let trendChart = null
-const breakdownCharts = {}
 
 async function loadChartJs() {
   if (Chart) return
@@ -817,29 +824,11 @@ async function exportBreakdown(bd) {
   XLSX.writeFile(wb, fileName)
 }
 
-// ── Color palette ──
-const PALETTE = [
-  '#00b4c8','#c9a84c','#00b4c8','#10b981','#f59e0b',
-  '#ef4444','#c9a84c','#10b981','#f59e0b','#00b4c8',
-  '#00b4c8','#c9a84c','#f59e0b','#00b4c8','#c9a84c',
-]
 function alpha(hex, a) {
   const r = parseInt(hex.slice(1,3),16)
   const g = parseInt(hex.slice(3,5),16)
   const b = parseInt(hex.slice(5,7),16)
   return `rgba(${r},${g},${b},${a})`
-}
-function lighten(hex, amt) {
-  const r = Math.min(255, parseInt(hex.slice(1,3),16) + Math.round(255*amt))
-  const g = Math.min(255, parseInt(hex.slice(3,5),16) + Math.round(255*amt))
-  const b = Math.min(255, parseInt(hex.slice(5,7),16) + Math.round(255*amt))
-  return `rgb(${r},${g},${b})`
-}
-function darken(hex, amt) {
-  const r = Math.max(0, parseInt(hex.slice(1,3),16) - Math.round(255*amt))
-  const g = Math.max(0, parseInt(hex.slice(3,5),16) - Math.round(255*amt))
-  const b = Math.max(0, parseInt(hex.slice(5,7),16) - Math.round(255*amt))
-  return `rgb(${r},${g},${b})`
 }
 function compactNum(n) {
   if (n >= 1e9) return (n/1e9).toFixed(1) + 'B'
@@ -875,7 +864,6 @@ async function loadDashboard() {
     // Extra tick for v-if="!loading" to fully render canvas elements
     setTimeout(() => {
       renderTrendChart(data.monthly_trend || [])
-      renderAllBreakdownCharts()
     }, 100)
 
   } catch(e) {
@@ -886,16 +874,12 @@ async function loadDashboard() {
 
 function destroyAllCharts() {
   if (trendChart) { trendChart.destroy(); trendChart = null }
-  Object.values(breakdownCharts).forEach(c => c?.destroy())
-  Object.keys(breakdownCharts).forEach(k => delete breakdownCharts[k])
 }
 
-// Re-render a single breakdown chart when user switches tab back to chart
+// Switching back to "chart" just re-shows <DonutChart3D> — it renders
+// itself on mount, no manual re-render needed.
 function onTabChange(bd, idx) {
   bd.tab = 'chart'
-  nextTick(() => {
-    setTimeout(() => renderSingleBreakdownChart(bd, idx), 50)
-  })
 }
 
 // ── Trend Line Chart ──
@@ -973,112 +957,6 @@ function renderTrendChart(rows) {
   })
 }
 
-// ── Breakdown Donut Charts ──
-function renderAllBreakdownCharts() {
-  breakdowns.value.forEach((bd, idx) => {
-    if (bd.tab === 'chart') renderSingleBreakdownChart(bd, idx)
-  })
-}
-
-function renderSingleBreakdownChart(bd, idx) {
-  // Destroy old if exists
-  if (breakdownCharts[idx]) { breakdownCharts[idx].destroy(); delete breakdownCharts[idx] }
-
-  const canvas = document.getElementById(`breakdown-chart-${idx}`)
-  if (!canvas) return
-
-  const ctx  = canvas.getContext('2d')
-  const rows = bd.rows.slice(0, 12)
-  const total = rows.reduce((s, r) => s + r.value, 0)
-
-  // Build colors — dominant slice gets gradient for 3D feel
-  const backgroundColors = rows.map((_, i) => {
-    const baseColor = PALETTE[i % PALETTE.length]
-    if (i === 0) {
-      const grad = ctx.createLinearGradient(-150, -150, 150, 150)
-      grad.addColorStop(0, lighten(baseColor, 0.35))
-      grad.addColorStop(0.45, baseColor)
-      grad.addColorStop(1, darken(baseColor, 0.25))
-      return grad
-    }
-    return alpha(baseColor, 0.85)
-  })
-
-  breakdownCharts[idx] = new Chart(ctx, {
-    type: 'doughnut',
-    data: {
-      labels: rows.map(r => r.label),
-      datasets: [{
-        data: rows.map(r => r.value),
-        backgroundColor: backgroundColors,
-        borderColor: rows.map((_, i) => PALETTE[i % PALETTE.length]),
-        borderWidth: 1.5,
-        hoverOffset: 12,
-        hoverBorderWidth: 2,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '62%',
-      plugins: {
-        legend: {
-          position: 'right',
-          labels: {
-            color: '#ffffff',
-            font: { size: 11 },
-            padding: 12,
-            usePointStyle: true,
-            pointStyleWidth: 10,
-            generateLabels: (chart) => {
-              return chart.data.labels.map((label, i) => {
-                const val = chart.data.datasets[0].data[i]
-                const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0
-                return {
-                  text: `${label}  ${pct}%`,
-                  fillStyle: PALETTE[i % PALETTE.length],
-                  strokeStyle: PALETTE[i % PALETTE.length],
-                  fontColor: '#ffffff',
-                  pointStyle: 'rect',
-                  index: i,
-                }
-              })
-            }
-          }
-        },
-        tooltip: {
-          callbacks: {
-            label: ctx => {
-              const val = ctx.raw
-              const pct = total > 0 ? ((val/total)*100).toFixed(1) : 0
-              return ` ${ctx.label}: ${Number(val).toLocaleString('en-US', { maximumFractionDigits: 0 })} (${pct}%)`
-            }
-          }
-        }
-      },
-      animation: { animateRotate: true, animateScale: true, duration: 700, easing: 'easeOutQuart' }
-    },
-    plugins: [{
-      id: 'centerText',
-      afterDraw(chart) {
-        const { ctx, chartArea } = chart
-        if (!chartArea) return
-        const cx = (chartArea.left + chartArea.right) / 2
-        const cy = (chartArea.top + chartArea.bottom) / 2
-        ctx.save()
-        ctx.font = 'bold 10px sans-serif'
-        ctx.fillStyle = '#64748b'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText('TOTAL', cx, cy - 9)
-        ctx.font = 'bold 13px sans-serif'
-        ctx.fillStyle = '#ffffff'
-        ctx.fillText(compactNum(total), cx, cy + 8)
-        ctx.restore()
-      }
-    }]
-  })
-}
 
 // ── Takeaway popup ──
 async function openTakeaway(achiever) {
@@ -1142,15 +1020,15 @@ function fmt(val) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
 }
 function natureBg(label) {
-  const map = { new: 'bg-mp-teal-subtle/40 border-mp-teal', repeating: 'bg-mp-success/40 border-mp-success', active: 'bg-mp-success/40 border-mp-success', stop: 'bg-mp-warning/40 border-mp-warning', dead: 'bg-mp-danger/40 border-mp-danger', stop_reactivated: 'bg-mp-gold/40 border-mp-gold' }
+  const map = { new: 'bg-mp-teal-subtle/40 border-mp-teal', repeating: 'bg-mp-success/40 border-mp-success', active: 'bg-mp-success/40 border-mp-success', stop: 'bg-mp-warning/40 border-mp-warning', dead: 'bg-mp-danger/40 border-mp-danger', stop_reactivated: 'bg-mp-gold/40 border-mp-gold', dead_reactivated: 'bg-purple-500/20 border-purple-500' }
   return map[label] || 'bg-mp-card-hover border-mp-border'
 }
 function natureText(label) {
-  const map = { new: 'text-white', repeating: 'text-mp-success', active: 'text-mp-success', stop: 'text-mp-warning', dead: 'text-mp-danger', stop_reactivated: 'text-white' }
+  const map = { new: 'text-white', repeating: 'text-mp-success', active: 'text-mp-success', stop: 'text-mp-warning', dead: 'text-mp-danger', stop_reactivated: 'text-white', dead_reactivated: 'text-purple-400' }
   return map[label] || 'text-mp-muted'
 }
 function natureLabel(label) {
-  const map = { new: 'New', repeating: 'Repeating', active: 'Active (3+ yrs)', stop: 'Stop', dead: 'Dead', stop_reactivated: 'Reactivated' }
+  const map = { new: 'New', repeating: 'Repeating', active: 'Active (3+ yrs)', stop: 'Stop', dead: 'Dead', stop_reactivated: 'Reactivated', dead_reactivated: 'Dead Reactivated' }
   return map[label] || label
 }
 
