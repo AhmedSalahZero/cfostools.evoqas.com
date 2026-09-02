@@ -1,12 +1,12 @@
 <template>
-  <Head title="New Comparison Dashboard" />
+  <Head :title="type === 'expense' ? 'New Expense Comparison Dashboard' : 'New Comparison Dashboard'" />
   <AuthenticatedLayout>
     <div class="max-w-5xl mx-auto px-6 py-8">
       <div class="flex items-center gap-3 mb-6">
         <Link :href="route('comparison-dashboard.index', company.id)" class="text-mp-muted hover:text-mp-text-secondary text-sm">← Comparison Dashboards</Link>
       </div>
 
-      <h1 class="text-xl font-bold text-mp-text-secondary mb-1">New Comparison Dashboard</h1>
+      <h1 class="text-xl font-bold text-mp-text-secondary mb-1">{{ type === 'expense' ? 'New Expense Comparison Dashboard' : 'New Sales Comparison Dashboard' }}</h1>
       <p class="text-sm text-mp-muted mb-8">Pick any 2 to 5 periods to compare — a quarter vs another quarter, this year vs last, whatever fits.</p>
 
       <div class="bg-mp-card border border-mp-border rounded-2xl p-6 space-y-6">
@@ -65,11 +65,12 @@ import { ref, computed, watch } from 'vue'
 import { Head, Link, router } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 
-const props = defineProps({ company: Object })
+const props = defineProps({ company: Object, type: { type: String, default: 'sales' } })
 
 const periodCount = ref(2)
 const form = ref({
   name: '',
+  type: props.type,
   periods: [{ label: '', from: '', to: '' }, { label: '', from: '', to: '' }],
 })
 const saving = ref(false)

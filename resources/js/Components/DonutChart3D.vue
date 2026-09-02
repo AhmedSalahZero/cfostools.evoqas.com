@@ -13,11 +13,11 @@
  * recreated here with a small Chart.js plugin, with no licensing
  * requirement (Chart.js is MIT-licensed).
  *
- * Every slice gets a genuinely distinct color (see Utils/chartColors),
+ * Every slice gets a genuinely distinct color (see utils/chartColors),
  * never a repeated one, even for charts with many categories.
  */
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { generateDistinctColors, shadeColor } from '@/Utils/chartColors'
+import { generateDistinctColors, shadeColor } from '@/utils/chartColors'
 
 const props = defineProps({
   data:        { type: Array, required: true }, // [{ [labelKey]: ..., [valueKey]: ... }]

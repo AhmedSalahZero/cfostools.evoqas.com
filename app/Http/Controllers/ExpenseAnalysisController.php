@@ -427,6 +427,8 @@ class ExpenseAnalysisController extends Controller
                 'total'    => round((float) $r->total, 2),
             ]);
 
+        $runRate = $this->computeRunRateProjection($cid, $from, $to);
+
         return response()->json([
             'kpis' => [
                 'total_expense'  => (float) $totalExpense,
@@ -440,7 +442,153 @@ class ExpenseAnalysisController extends Controller
             'monthly_trend'      => $trendData,
             'top_items'          => $topItems,
             'stats_per_category' => $statsPerCategory,
+            'run_rate'           => $runRate,
         ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RUN-RATE PROJECTION
+    // Only meaningful for a year-to-date range (from = Jan 1, to = some
+    // date before Dec 31 of that same year) — that's the standard framing
+    // of a "run rate" and the only case where "project the rest of the
+    // year" makes sense. Any other date range returns applicable=false and
+    // the frontend simply hides the card.
+    //
+    // Method C (default): YTD actual + (remaining months × a trailing
+    // 3-month average, with any IQR outlier months excluded from that
+    // average so a one-off spike doesn't get annualized).
+    //
+    // Method D (used automatically once 2 full prior calendar years of
+    // data exist): YTD actual ÷ the average share of the full year that
+    // prior years had typically reached by this same point — this is
+    // what correctly inflates the projection for a business where a big
+    // chunk of spend is seasonally loaded into specific months (e.g. a
+    // December bonus payout) rather than assuming a flat pace.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function computeRunRateProjection($cid, $from, $to): array
+    {
+        $fromDate = \Carbon\Carbon::parse($from);
+        $toDate   = \Carbon\Carbon::parse($to);
+        $year     = $fromDate->year;
+        $yearEnd  = \Carbon\Carbon::create($year, 12, 31);
+
+        if (!$fromDate->isSameDay(\Carbon\Carbon::create($year, 1, 1))) {
+            return ['applicable' => false, 'reason' => 'not_ytd'];
+        }
+        if ($toDate->greaterThanOrEqualTo($yearEnd)) {
+            return ['applicable' => false, 'reason' => 'full_year'];
+        }
+
+        $monthlyRows = ExpenseData::where('portfolio_company_id', $cid)
+            ->whereBetween('date', [$from, $to])
+            ->selectRaw("DATE_FORMAT(date, '%Y-%m') as month, SUM(expense_amount) as total")
+            ->groupBy('month')->orderBy('month')->get();
+
+        $monthsElapsed = $monthlyRows->count();
+        if ($monthsElapsed === 0) {
+            return ['applicable' => false, 'reason' => 'no_data'];
+        }
+        $remainingMonths = 12 - $monthsElapsed;
+        if ($remainingMonths <= 0) {
+            return ['applicable' => false, 'reason' => 'full_year'];
+        }
+
+        $ytdActual = (float) $monthlyRows->sum('total');
+        $values = $monthlyRows->pluck('total')->map(fn($v) => (float) $v)->values();
+
+        // ── Identify outlier months (IQR, same method as Reports/Comparison
+        // Dashboard) so a one-off spike doesn't distort the trailing average.
+        $outlierMonths = [];
+        if ($values->count() >= 4) {
+            $sorted = $values->sort()->values()->toArray();
+            $q1 = $this->percentile($sorted, 25);
+            $q3 = $this->percentile($sorted, 75);
+            $iqr = $q3 - $q1;
+            $lowerFence = $q1 - 1.5 * $iqr;
+            $upperFence = $q3 + 1.5 * $iqr;
+            foreach ($monthlyRows as $row) {
+                if ((float) $row->total > $upperFence || (float) $row->total < $lowerFence) {
+                    $outlierMonths[] = $row->month;
+                }
+            }
+        }
+
+        // ── Method C: trailing 3 months, outliers excluded ──
+        $trailing = $monthlyRows->reverse()->values()->take(3)
+            ->filter(fn($r) => !in_array($r->month, $outlierMonths));
+        // If excluding outliers left nothing (e.g. all 3 recent months were
+        // flagged), fall back to every non-outlier month available rather
+        // than silently using an outlier anyway.
+        if ($trailing->isEmpty()) {
+            $trailing = $monthlyRows->filter(fn($r) => !in_array($r->month, $outlierMonths));
+        }
+        // If EVERY month is somehow an outlier (degenerate case), fall back
+        // to the plain average of everything rather than returning nothing.
+        if ($trailing->isEmpty()) {
+            $trailing = $monthlyRows;
+        }
+        $trailingAvg = (float) $trailing->avg('total');
+        $projectedFullYearC = $ytdActual + ($trailingAvg * $remainingMonths);
+
+        $result = [
+            'applicable'          => true,
+            'method'              => 'trend',
+            'year'                => $year,
+            'as_of'               => $to,
+            'months_elapsed'      => $monthsElapsed,
+            'months_remaining'    => $remainingMonths,
+            'ytd_actual'          => round($ytdActual, 2),
+            'trailing_avg'        => round($trailingAvg, 2),
+            'trailing_months_used'=> $trailing->pluck('month')->values()->all(),
+            'outlier_months_excluded' => $outlierMonths,
+            'projected_full_year' => round($projectedFullYearC, 2),
+            'projected_remainder' => round($projectedFullYearC - $ytdActual, 2),
+            'years_of_history_used' => 0,
+        ];
+
+        // ── Method D: seasonal, only if 2 full prior calendar years exist ──
+        $candidateYears = [$year - 1, $year - 2];
+        $fullPriorYears = [];
+        foreach ($candidateYears as $y) {
+            $monthsPresent = (int) ExpenseData::where('portfolio_company_id', $cid)
+                ->whereBetween('date', ["{$y}-01-01", "{$y}-12-31"])
+                ->selectRaw("COUNT(DISTINCT DATE_FORMAT(date, '%Y-%m')) as month_count")
+                ->value('month_count');
+            if ($monthsPresent === 12) $fullPriorYears[] = $y;
+        }
+
+        if (count($fullPriorYears) >= 2) {
+            $ratios = [];
+            foreach ($fullPriorYears as $y) {
+                $yearTotal = (float) ExpenseData::where('portfolio_company_id', $cid)
+                    ->whereBetween('date', ["{$y}-01-01", "{$y}-12-31"])->sum('expense_amount');
+                $cutoff = \Carbon\Carbon::create($y, $toDate->month, 1)->endOfMonth();
+                if ($toDate->day < $cutoff->day) $cutoff->setDay($toDate->day);
+                $elapsedTotal = (float) ExpenseData::where('portfolio_company_id', $cid)
+                    ->whereBetween('date', ["{$y}-01-01", $cutoff->format('Y-m-d')])->sum('expense_amount');
+                if ($yearTotal > 0) $ratios[] = $elapsedTotal / $yearTotal;
+            }
+
+            if (count($ratios) >= 2) {
+                $avgRatio = array_sum($ratios) / count($ratios);
+                if ($avgRatio > 0) {
+                    $projectedFullYearD = $ytdActual / $avgRatio;
+                    $result['method']                 = 'seasonal';
+                    $result['projected_full_year']     = round($projectedFullYearD, 2);
+                    $result['projected_remainder']     = round($projectedFullYearD - $ytdActual, 2);
+                    $result['years_of_history_used']   = count($fullPriorYears);
+                    $result['seasonal_years']          = $fullPriorYears;
+                    $result['seasonal_pct_elapsed_by_now'] = round($avgRatio * 100, 1);
+                    // Keep the Method C figures too, so the UI can show
+                    // both and be transparent about which one is driving
+                    // the headline number.
+                    $result['trend_method_full_year'] = round($projectedFullYearC, 2);
+                }
+            }
+        }
+
+        return $result;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -577,39 +725,64 @@ class ExpenseAnalysisController extends Controller
 
     private function periodComparison($cid, $request): array
     {
-        $dim    = $request->dimension ?? 'category';
+        $dim    = $request->compare_by ?? 'category';
         $colMap = ['category' => 'expense_category', 'sub_category' => 'expense_sub_category', 'item' => 'expense_name'];
         $col    = $colMap[$dim] ?? 'expense_category';
 
-        $p1 = ExpenseData::where('portfolio_company_id', $cid)
-            ->whereBetween('date', [$request->date_from, $request->date_to])
-            ->whereNotNull($col)->where($col, '!=', '')
-            ->selectRaw("`$col` as label, SUM(expense_amount) as value")
-            ->groupBy($col)->get()->keyBy('label');
+        // 2–5 periods, sent as `periods` = a JSON array of {from, to} pairs.
+        // Falls back to the old date_from/date_to + compare_from/compare_to
+        // pair so older callers (e.g. a stale export link) still work.
+        $periods = [];
+        $rawPeriods = $request->input('periods');
+        if (is_string($rawPeriods)) $rawPeriods = json_decode($rawPeriods, true);
+        if (is_array($rawPeriods)) {
+            foreach ($rawPeriods as $p) {
+                if (!empty($p['from']) && !empty($p['to'])) {
+                    $periods[] = ['from' => $p['from'], 'to' => $p['to']];
+                }
+            }
+        }
+        if (empty($periods)) {
+            $periods[] = ['from' => $request->date_from, 'to' => $request->date_to];
+            if ($request->filled('compare_from') && $request->filled('compare_to')) {
+                $periods[] = ['from' => $request->compare_from, 'to' => $request->compare_to];
+            }
+        }
+        // Always at least 1, never more than 5.
+        $periods = array_slice($periods, 0, 5);
 
-        $p2 = ExpenseData::where('portfolio_company_id', $cid)
-            ->whereBetween('date', [$request->compare_from, $request->compare_to])
-            ->whereNotNull($col)->where($col, '!=', '')
-            ->selectRaw("`$col` as label, SUM(expense_amount) as value")
-            ->groupBy($col)->get()->keyBy('label');
+        $periodTotals = array_map(function ($p) use ($cid, $col) {
+            return ExpenseData::where('portfolio_company_id', $cid)
+                ->whereBetween('date', [$p['from'], $p['to']])
+                ->whereNotNull($col)->where($col, '!=', '')
+                ->selectRaw("`$col` as label, SUM(expense_amount) as value")
+                ->groupBy($col)->get()->keyBy('label');
+        }, $periods);
 
-        $allLabels = $p1->keys()->merge($p2->keys())->unique()->values();
+        $allLabels = collect($periodTotals)->flatMap(fn($c) => $c->keys())->unique()->values();
 
-        $rows = $allLabels->map(function ($label) use ($p1, $p2) {
-            $v1 = (float) ($p1[$label]->value ?? 0);
-            $v2 = (float) ($p2[$label]->value ?? 0);
+        $rows = $allLabels->map(function ($label) use ($periodTotals) {
+            $values = array_map(fn($pt) => (float) ($pt[$label]->value ?? 0), $periodTotals);
+
+            // % change vs the immediately preceding period — one fewer
+            // entry than $values, aligned to values[1], values[2], ...
+            $changes = [];
+            for ($i = 1; $i < count($values); $i++) {
+                $changes[] = $values[$i - 1] > 0
+                    ? round(($values[$i] - $values[$i - 1]) / $values[$i - 1] * 100, 2)
+                    : null;
+            }
+
             return [
                 'label'   => $label,
-                'period1' => $v1,
-                'period2' => $v2,
-                'change'  => $v1 > 0 ? round(($v2 - $v1) / $v1 * 100, 2) : null,
+                'values'  => $values,
+                'changes' => $changes,
             ];
-        })->sortByDesc('period1')->values();
+        })->sortByDesc(fn($r) => $r['values'][0])->values();
 
         return [
             'type'    => 'period_comparison',
-            'period1' => ['from' => $request->date_from,    'to' => $request->date_to],
-            'period2' => ['from' => $request->compare_from, 'to' => $request->compare_to],
+            'periods' => $periods,
             'rows'    => $rows,
         ];
     }
@@ -637,11 +810,29 @@ class ExpenseAnalysisController extends Controller
             $avg    = $values->avg();
             $std    = $this->stdDev($values->toArray());
 
-            $outlierMonths = $rows->filter(fn($r) =>
-                (float)$r->monthly_total > $avg + 1.5 * $std ||
-                (float)$r->monthly_total < $avg - 1.5 * $std
-            )->map(fn($r) => ['month' => $r->month, 'value' => (float)$r->monthly_total])
-             ->values()->toArray();
+            // IQR (Tukey's fences) instead of a flat 1.5×std-dev band: with
+            // only a handful of months, std-dev is easily skewed by normal
+            // growth/seasonality, so a fixed z-score threshold ends up
+            // flagging the highest and lowest month of almost every item —
+            // even ones that are just trending steadily up, not anomalous.
+            // IQR only flags points genuinely far outside the item's typical
+            // spread, and we skip it entirely below 4 months since quartiles
+            // aren't meaningful on that little data.
+            $outlierMonths = [];
+            if ($count >= 4) {
+                $sortedVals = $values->toArray();
+                $q1 = $this->percentile($sortedVals, 25);
+                $q3 = $this->percentile($sortedVals, 75);
+                $iqr = $q3 - $q1;
+                $lowerFence = $q1 - 1.5 * $iqr;
+                $upperFence = $q3 + 1.5 * $iqr;
+
+                $outlierMonths = $rows->filter(fn($r) =>
+                    (float)$r->monthly_total > $upperFence ||
+                    (float)$r->monthly_total < $lowerFence
+                )->map(fn($r) => ['month' => $r->month, 'value' => (float)$r->monthly_total])
+                 ->values()->toArray();
+            }
 
             $results[] = [
                 'category'       => $cat,
@@ -673,6 +864,25 @@ class ExpenseAnalysisController extends Controller
             'annually'      => ["DATE_FORMAT(`date`, '%Y')", "YEAR(`date`)"],
             default         => ["DATE_FORMAT(`date`, '%Y-%b')", "DATE_FORMAT(`date`, '%Y%m') + 0"],
         };
+    }
+
+    /**
+     * Linear-interpolation percentile of a SORTED array of numbers
+     * (e.g. percentile($sorted, 25) for Q1, percentile($sorted, 75) for Q3).
+     */
+    private function percentile(array $sortedValues, float $pct): float
+    {
+        $count = count($sortedValues);
+        if ($count === 0) return 0;
+        if ($count === 1) return $sortedValues[0];
+
+        $rank = ($pct / 100) * ($count - 1);
+        $low  = (int) floor($rank);
+        $high = (int) ceil($rank);
+        if ($low === $high) return $sortedValues[$low];
+
+        $fraction = $rank - $low;
+        return $sortedValues[$low] + $fraction * ($sortedValues[$high] - $sortedValues[$low]);
     }
 
     private function stdDev(array $values): float

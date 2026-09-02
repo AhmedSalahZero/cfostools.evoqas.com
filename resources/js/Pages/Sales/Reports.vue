@@ -213,7 +213,7 @@
                 :date-to="latestPeriod.to"
                 :metric="params.metric"
                 v-model="params.selected_items"
-                :label="`${dimensionFields[params.dimension1] || 'Items'} — pick specific ones, or leave empty for Top 300 + Others`" />
+                :label="`${dimensionFields[params.dimension1] || 'Items'} — pick specific ones, or leave empty for Top 500 + Others`" />
             </div>
 
             <!-- Invoice Analysis: view toggle + view-specific controls -->
@@ -248,7 +248,7 @@
                   :date-to="params.date_to"
                   :metric="params.metric"
                   v-model="params.dim1_items"
-                  :label="`${dimensionFields[params.dimension1] || 'Items'} — pick specific ones, or leave empty for Top 300 + Others`" />
+                  :label="`${dimensionFields[params.dimension1] || 'Items'} — pick specific ones, or leave empty for Top 500 + Others`" />
               </div>
 
               <div v-if="params.invoice_view === 'large_invoices'" class="max-w-xs">
@@ -971,7 +971,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 import DimensionMultiSelect from '@/Components/DimensionMultiSelect.vue'
-import { generateDistinctColors, shadeColor } from '@/Utils/chartColors'
+import { generateDistinctColors, shadeColor } from '@/utils/chartColors'
 import axios from 'axios'
 
 const props = defineProps({
@@ -1313,8 +1313,8 @@ const params = ref({
   metric:         Object.keys(props.metricFields)[0] ?? 'net_sales_value',
   dimension1:     defaultDim1,
   dimension2:     Object.keys(props.dimensionFields)[1] ?? 'product_category',
-  selected_items: [],  // Period Comparison: specific items for dimension1, or [] = Top 300 + Others
-  dim1_items:     [],  // Two Factors Trend / Matrix / Invoice Analysis: specific items, or [] = Top 300 + Others
+  selected_items: [],  // Period Comparison: specific items for dimension1, or [] = Top 500 + Others
+  dim1_items:     [],  // Two Factors Trend / Matrix / Invoice Analysis: specific items, or [] = Top 500 + Others
   dim2_items:     [],  // Two Factors Trend / Matrix: specific Factor 2 / column items, or [] = Top N + Others
   invoice_view:      'snapshot', // Invoice Analysis: 'snapshot' | 'by_dimension' | 'large_invoices'
   invoice_threshold: 1000000,    // Invoice Analysis: large-invoice threshold

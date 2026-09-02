@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Controllers\Concerns\AuthorizesPortfolioCompany;
 use App\Models\ComparisonDashboard;
 use App\Models\ComparisonDashboardNote;
+use App\Models\ExpenseData;
 use App\Models\PortfolioCompany;
 use App\Models\SalesData;
 use Illuminate\Http\Request;
@@ -17,6 +18,11 @@ class ComparisonDashboardController extends Controller
     private function authorizeSalesCompany($companyId): PortfolioCompany
     {
         return $this->authorizeCompany((int) $companyId, 'sales_analysis');
+    }
+
+    private function authorizeExpenseCompany($companyId): PortfolioCompany
+    {
+        return $this->authorizeCompany((int) $companyId, 'expense_analysis');
     }
 
     // Extra business dimensions we CAN analyze if the company's sales
@@ -38,7 +44,7 @@ class ComparisonDashboardController extends Controller
 
     public function index($companyId)
     {
-        $company = $this->authorizeSalesCompany($companyId);
+        $company = $this->authorizeCompany((int) $companyId);
         $dashboards = ComparisonDashboard::where('portfolio_company_id', $companyId)
             ->orderByDesc('created_at')->get();
 
@@ -48,17 +54,21 @@ class ComparisonDashboardController extends Controller
         ]);
     }
 
-    public function create($companyId)
+    public function create($companyId, Request $request)
     {
-        $company = $this->authorizeSalesCompany($companyId);
+        $type = $request->query('type', 'sales') === 'expense' ? 'expense' : 'sales';
+        $company = $type === 'expense' ? $this->authorizeExpenseCompany($companyId) : $this->authorizeSalesCompany($companyId);
         return Inertia::render('ComparisonDashboard/Create', [
             'company' => $company,
+            'type'    => $type,
         ]);
     }
 
     public function store(Request $request, $companyId)
     {
-        $this->authorizeSalesCompany($companyId);
+        $type = $request->input('type') === 'expense' ? 'expense' : 'sales';
+        if ($type === 'expense') $this->authorizeExpenseCompany($companyId); else $this->authorizeSalesCompany($companyId);
+
         $request->validate([
             'name'            => ['required', 'string', 'max:255'],
             'periods'         => ['required', 'array', 'min:2', 'max:5'],
@@ -69,6 +79,7 @@ class ComparisonDashboardController extends Controller
 
         $dashboard = ComparisonDashboard::create([
             'portfolio_company_id' => $companyId,
+            'type'                 => $type,
             'name'                 => $request->name,
             'periods'              => $request->periods,
             'is_public'            => false,
@@ -80,8 +91,18 @@ class ComparisonDashboardController extends Controller
 
     public function show($companyId, $dashboardId)
     {
-        $company   = $this->authorizeSalesCompany($companyId);
         $dashboard = ComparisonDashboard::where('portfolio_company_id', $companyId)->findOrFail($dashboardId);
+        $company   = $dashboard->type === 'expense'
+            ? $this->authorizeExpenseCompany($companyId)
+            : $this->authorizeSalesCompany($companyId);
+
+        if ($dashboard->type === 'expense') {
+            return Inertia::render('ComparisonDashboard/ExpenseShow', [
+                'company'   => $company,
+                'dashboard' => $dashboard,
+                ...$this->buildExpenseAnalysis($companyId, $dashboard->periods, $dashboardId),
+            ]);
+        }
 
         return Inertia::render('ComparisonDashboard/Show', [
             'company'   => $company,
@@ -90,17 +111,30 @@ class ComparisonDashboardController extends Controller
         ]);
     }
 
+    // Authorize against a dashboard's OWN type, not a guessed one — used by
+    // actions (destroy/toggle-share/notes) that operate on an existing
+    // dashboard rather than creating a new one.
+    private function authorizeDashboard($companyId, ComparisonDashboard $dashboard): void
+    {
+        if ($dashboard->type === 'expense') {
+            $this->authorizeExpenseCompany($companyId);
+        } else {
+            $this->authorizeSalesCompany($companyId);
+        }
+    }
+
     public function destroy($companyId, $dashboardId)
     {
-        $this->authorizeSalesCompany($companyId);
-        ComparisonDashboard::where('portfolio_company_id', $companyId)->findOrFail($dashboardId)->delete();
+        $dashboard = ComparisonDashboard::where('portfolio_company_id', $companyId)->findOrFail($dashboardId);
+        $this->authorizeDashboard($companyId, $dashboard);
+        $dashboard->delete();
         return redirect()->route('comparison-dashboard.index', $companyId);
     }
 
     public function toggleShare($companyId, $dashboardId)
     {
-        $this->authorizeSalesCompany($companyId);
         $dashboard = ComparisonDashboard::where('portfolio_company_id', $companyId)->findOrFail($dashboardId);
+        $this->authorizeDashboard($companyId, $dashboard);
         $dashboard->is_public = ! $dashboard->is_public;
         $dashboard->save();
 
@@ -119,6 +153,14 @@ class ComparisonDashboardController extends Controller
 
         $companyId = $dashboard->portfolio_company_id;
         $company   = PortfolioCompany::findOrFail($companyId);
+
+        if ($dashboard->type === 'expense') {
+            return Inertia::render('ComparisonDashboard/ExpensePublicShow', [
+                'companyName' => $company->name,
+                'dashboard'   => ['name' => $dashboard->name, 'periods' => $dashboard->periods],
+                ...$this->buildExpenseAnalysis($companyId, $dashboard->periods, $dashboard->id),
+            ]);
+        }
 
         return Inertia::render('ComparisonDashboard/PublicShow', [
             'companyName' => $company->name,
@@ -206,7 +248,8 @@ class ComparisonDashboardController extends Controller
 
     public function saveNote(Request $request, $companyId, $dashboardId)
     {
-        $this->authorizeSalesCompany($companyId);
+        $dashboard = ComparisonDashboard::where('portfolio_company_id', $companyId)->findOrFail($dashboardId);
+        $this->authorizeDashboard($companyId, $dashboard);
         $request->validate([
             'section_key' => ['required', 'string', 'max:60'],
             'note'        => ['required', 'string', 'max:50000'],
@@ -222,7 +265,8 @@ class ComparisonDashboardController extends Controller
 
     public function getNotes($companyId, $dashboardId)
     {
-        $this->authorizeSalesCompany($companyId);
+        $dashboard = ComparisonDashboard::where('portfolio_company_id', $companyId)->findOrFail($dashboardId);
+        $this->authorizeDashboard($companyId, $dashboard);
         return response()->json([
             'notes' => ComparisonDashboardNote::where('comparison_dashboard_id', $dashboardId)->get()->keyBy('section_key'),
         ]);
@@ -230,7 +274,8 @@ class ComparisonDashboardController extends Controller
 
     public function deleteNote($companyId, $dashboardId, $noteId)
     {
-        $this->authorizeSalesCompany($companyId);
+        $dashboard = ComparisonDashboard::where('portfolio_company_id', $companyId)->findOrFail($dashboardId);
+        $this->authorizeDashboard($companyId, $dashboard);
         ComparisonDashboardNote::where('comparison_dashboard_id', $dashboardId)->findOrFail($noteId)->delete();
         return response()->json(['success' => true]);
     }
@@ -994,11 +1039,22 @@ class ComparisonDashboardController extends Controller
         if ($cats->isEmpty()) return "No categorized product data found in {$latest['period']['label']}.";
 
         $shareOf = fn($c) => $c['total_products'] > 0 ? $c['core_count'] / $c['total_products'] * 100 : 0;
-        $avgProductSharePct = round($cats->map($shareOf)->avg(), 1);
+
+        // Weighted by total_products (sum of every category's core_count ÷
+        // sum of every category's total_products), NOT a plain average of
+        // each category's own %. A plain average treats a 1-product
+        // category (which is trivially "100% concentrated" — its one
+        // product IS 85%+ of its revenue) as equally important as a
+        // 40-product category, which pulls the headline number around
+        // in a way that doesn't reflect the product catalog as a whole.
+        $totalProducts = $cats->sum('total_products');
+        $totalCore     = $cats->sum('core_count');
+        $avgProductSharePct = $totalProducts > 0 ? round($totalCore / $totalProducts * 100, 1) : 0;
+
         $mostConcentrated   = $cats->sortBy($shareOf)->first();
         $mostSpread         = $cats->sortByDesc($shareOf)->first();
 
-        return "In {$latest['period']['label']}, an average of just {$avgProductSharePct}% of a category's products account for ~85% of its revenue. "
+        return "In {$latest['period']['label']}, just {$avgProductSharePct}% of all products across every category account for ~85% of that category's revenue on average. "
              . "\"{$mostConcentrated['category']}\" is the most concentrated — only {$mostConcentrated['core_count']} of its {$mostConcentrated['total_products']} products drive the bulk of sales. "
              . "\"{$mostSpread['category']}\" is the most spread out, needing {$mostSpread['core_count']} of {$mostSpread['total_products']} products to reach that same ~85%.";
     }
@@ -1084,5 +1140,770 @@ class ComparisonDashboardController extends Controller
 
         usort($result, fn($a, $b) => $b['total_value'] <=> $a['total_value']);
         return $result;
+    }
+
+    // ═════════════════════════════════════════════════════════════
+    // EXPENSE COMPARISON DASHBOARD
+    // Mirrors the Sales version above section-for-section wherever
+    // ExpenseData supports it. ExpenseData only has date/category/
+    // sub_category/name/amount — no customer, salesperson, branch,
+    // channel, or quantity — so Customer Nature, Salesperson
+    // Movements, and Business Mix have no expense equivalent and are
+    // simply not built here. In their place: Fixed vs Variable (reuses
+    // the Breakeven page's revenue-correlation classification) and
+    // Volatility & Outliers (reuses the Reports page's IQR logic),
+    // which the Sales dashboard has no equivalent of either.
+    // ═════════════════════════════════════════════════════════════
+
+    private function buildExpenseAnalysis($companyId, array $periods, $dashboardId): array
+    {
+        $zoomOut       = $this->expenseZoomOut($companyId, $periods);
+        $zoomIn        = $this->expenseZoomIn($companyId, $periods);
+        $vanishing     = $this->expenseVanishing($companyId, $periods);
+        $top100        = $this->expenseTop100($companyId, $periods);
+        $heroPairs     = $this->expenseHeroPairs($companyId, $periods);
+        $fixedVariable = $this->expenseFixedVariable($companyId, $periods);
+        $volatility    = $this->expenseVolatility($companyId, $periods);
+        $takeaways     = $this->expenseComputeTakeaways($zoomIn, $vanishing, $fixedVariable);
+
+        $concentration = [];
+        foreach ($periods as $p) {
+            $concentration[] = ['period' => $p, 'categories' => $this->expenseConcentration($companyId, $p)];
+        }
+
+        $savedNotes = ComparisonDashboardNote::where('comparison_dashboard_id', $dashboardId)->get()->keyBy('section_key');
+
+        $narratives = [];
+        $narratives['hero_summary'] = $this->expenseNarrativeHero($heroPairs);
+        $narratives['zoom_out']     = $this->expenseNarrativeZoomOut($companyId, $periods, $zoomOut);
+        foreach ($takeaways as $t) {
+            $narratives[$t['key']] = "{$t['stat']} {$t['text']}";
+        }
+        foreach ($zoomIn as $pair) {
+            $narratives[$pair['section_key']] = $this->expenseNarrativeZoomIn($pair);
+        }
+        foreach ($vanishing as $pair) {
+            $narratives[$pair['section_key']] = $this->expenseNarrativeVanishing($pair);
+        }
+        $narratives['top_expense_items']      = $this->expenseNarrativeTopRanked($top100);
+        $narratives['expense_concentration']  = $this->expenseNarrativeConcentration($concentration);
+        $narratives['fixed_variable']         = $this->expenseNarrativeFixedVariable($fixedVariable);
+        $narratives['volatility']             = $this->expenseNarrativeVolatility($volatility);
+
+        $notes = [];
+        foreach ($narratives as $key => $draft) {
+            $notes[$key] = [
+                'note'          => $savedNotes[$key]->note ?? $draft,
+                'is_auto'       => ! isset($savedNotes[$key]),
+                'auto_fallback' => $draft,
+            ];
+        }
+
+        return [
+            'zoomOut'       => $zoomOut,
+            'zoomIn'        => $zoomIn,
+            'vanishing'     => $vanishing,
+            'top100'        => $top100,
+            'heroPairs'     => $heroPairs,
+            'takeaways'     => $takeaways,
+            'concentration' => $concentration,
+            'fixedVariable' => $fixedVariable,
+            'volatility'    => $volatility,
+            'notes'         => $notes,
+        ];
+    }
+
+    // ── Expense equivalents of periodAgg/groupedValues ────────────
+    // Reuses alignForComparison/periodDays/periodsComparable from the
+    // Sales section above as-is — those only operate on period date
+    // ranges, not on SalesData, so they need no expense-specific copy.
+
+    private function expensePeriodAgg($companyId, array $period): array
+    {
+        $agg = ExpenseData::where('portfolio_company_id', $companyId)
+            ->whereBetween('date', [$period['from'], $period['to']])
+            ->selectRaw('
+                SUM(expense_amount) as total_expense,
+                COUNT(DISTINCT expense_category) as category_count,
+                COUNT(DISTINCT expense_name) as item_count,
+                COUNT(*) as line_count
+            ')->first();
+
+        $revenue = (float) (SalesData::where('portfolio_company_id', $companyId)
+            ->whereBetween('date', [$period['from'], $period['to']])->sum('net_sales_value'));
+
+        $totalExpense = (float) ($agg->total_expense ?? 0);
+
+        return [
+            'total_expense'  => $totalExpense,
+            'category_count' => (int) ($agg->category_count ?? 0),
+            'item_count'     => (int) ($agg->item_count ?? 0),
+            'line_count'     => (int) ($agg->line_count ?? 0),
+            'revenue'        => $revenue,
+            // null (not 0%) when there's no revenue data at all for this
+            // period, so the frontend can show "N/A" rather than a
+            // misleading 0%.
+            'ratio_pct'      => $revenue > 0 ? round($totalExpense / $revenue * 100, 1) : null,
+        ];
+    }
+
+    private function expenseGroupedValues($companyId, array $period, string $field)
+    {
+        return ExpenseData::where('portfolio_company_id', $companyId)
+            ->whereBetween('date', [$period['from'], $period['to']])
+            ->whereNotNull($field)->where($field, '!=', '')
+            ->selectRaw("`$field` as label, SUM(expense_amount) as value")
+            ->groupBy($field)->get()->pluck('value', 'label');
+    }
+
+    // ── Zoom Out ───────────────────────────────────────────────────
+
+    private function expenseZoomOut($companyId, array $periods): array
+    {
+        $rows = [];
+        foreach ($periods as $p) {
+            $agg  = $this->expensePeriodAgg($companyId, $p);
+            $days = $this->periodDays($p);
+            $rows[] = [
+                'label'             => $p['label'], 'from' => $p['from'], 'to' => $p['to'], 'days' => $days,
+                'total_expense'     => $agg['total_expense'],
+                'daily_avg'         => $days > 0 ? $agg['total_expense'] / $days : 0,
+                'category_count'    => $agg['category_count'],
+                'item_count'        => $agg['item_count'],
+                'line_count'        => $agg['line_count'],
+                'avg_per_category'  => $agg['category_count'] > 0 ? $agg['total_expense'] / $agg['category_count'] : 0,
+                'avg_per_item'      => $agg['item_count'] > 0 ? $agg['total_expense'] / $agg['item_count'] : 0,
+                'revenue'           => $agg['revenue'],
+                'ratio_pct'         => $agg['ratio_pct'],
+            ];
+        }
+
+        foreach ($periods as $i => $p) {
+            if ($i === 0) { $rows[$i]['growth_pct'] = null; continue; }
+            [$cmpPrev, $cmpCur, $wasAligned] = $this->alignForComparison($periods[$i - 1], $p);
+            if ($wasAligned) {
+                $base = $this->expensePeriodAgg($companyId, $cmpPrev)['total_expense'];
+                $cur  = $this->expensePeriodAgg($companyId, $cmpCur)['total_expense'];
+            } else {
+                $base = $rows[$i - 1]['total_expense'];
+                $cur  = $rows[$i]['total_expense'];
+            }
+            $rows[$i]['growth_pct'] = $base > 0 ? round(($cur - $base) / $base * 100, 1) : null;
+        }
+
+        return $rows;
+    }
+
+    // ── Zoom In — Category Movements + Expense Item Movements
+    //    (replaces Customer Nature + Salesperson Movements, neither of
+    //    which has an expense equivalent) ───────────────────────────
+
+    private function expenseZoomIn($companyId, array $periods): array
+    {
+        $pairs = [];
+        for ($i = 0; $i < count($periods) - 1; $i++) {
+            $pA = $periods[$i];
+            $pB = $periods[$i + 1];
+            [$cmpA, $cmpB, $wasAligned] = $this->alignForComparison($pA, $pB);
+
+            $catA = $this->expenseGroupedValues($companyId, $cmpA, 'expense_category');
+            $catB = $this->expenseGroupedValues($companyId, $cmpB, 'expense_category');
+            $categoryBreakdown = $catA->keys()->merge($catB->keys())->unique()->map(function ($c) use ($catA, $catB) {
+                $a = (float) ($catA[$c] ?? 0);
+                $b = (float) ($catB[$c] ?? 0);
+                $change = $b - $a;
+                return ['label' => $c, 'value_a' => $a, 'value_b' => $b, 'change' => $change, 'change_pct' => $a > 0 ? round($change / $a * 100, 1) : null];
+            })->sortByDesc(fn($r) => abs($r['change']))->values()->take(10);
+
+            $itemA = $this->expenseGroupedValues($companyId, $cmpA, 'expense_name');
+            $itemB = $this->expenseGroupedValues($companyId, $cmpB, 'expense_name');
+            $itemBreakdown = $itemA->keys()->merge($itemB->keys())->unique()->map(function ($n) use ($itemA, $itemB) {
+                $a = (float) ($itemA[$n] ?? 0);
+                $b = (float) ($itemB[$n] ?? 0);
+                $change = $b - $a;
+                return ['label' => $n, 'value_a' => $a, 'value_b' => $b, 'change' => $change, 'change_pct' => $a > 0 ? round($change / $a * 100, 1) : null];
+            })->sortByDesc(fn($r) => abs($r['change']))->values()->take(10);
+
+            $pairs[] = [
+                'section_key'        => "expense_zoom_in_{$i}_" . ($i + 1),
+                'period_a'           => $pA,
+                'period_b'           => $pB,
+                'compare_period_a'   => $cmpA,
+                'compare_period_b'   => $cmpB,
+                'was_aligned'        => $wasAligned,
+                'category_breakdown' => $categoryBreakdown,
+                'item_breakdown'     => $itemBreakdown,
+            ];
+        }
+        return $pairs;
+    }
+
+    // ── Vanishing Stars — expense items only (no "customers" side) ──
+    // Framed as neutral-to-positive rather than "risk": an expense not
+    // repeating is often a good thing (a contract ended, a one-off cost
+    // cleared), unlike vanishing sales revenue.
+
+    private function expenseVanishing($companyId, array $periods): array
+    {
+        $pairs = [];
+        for ($i = 0; $i < count($periods) - 1; $i++) {
+            $pA = $periods[$i];
+            $pB = $periods[$i + 1];
+            [$cmpA, $cmpB, $wasAligned] = $this->alignForComparison($pA, $pB);
+
+            $periodTotalA   = $this->expensePeriodAgg($companyId, $cmpA)['total_expense'];
+            $thresholdPct   = 0.5;
+            $thresholdValue = $periodTotalA > 0 ? $periodTotalA * ($thresholdPct / 100) : 0;
+
+            $items = $this->expenseFindVanished($companyId, $cmpA, $cmpB, 'expense_name', $thresholdValue);
+
+            $pairs[] = [
+                'section_key'      => "expense_vanish_{$i}_" . ($i + 1),
+                'period_a'         => $pA,
+                'period_b'         => $pB,
+                'compare_period_a' => $cmpA,
+                'compare_period_b' => $cmpB,
+                'was_aligned'      => $wasAligned,
+                'threshold_pct'    => $thresholdPct,
+                'threshold_value'  => $thresholdValue,
+                'items'            => $items['all'],
+                'items_count'      => $items['count'],
+                'items_total'      => $items['total'],
+                'items_cutoff'     => $items['cutoff_count'],
+            ];
+        }
+        return $pairs;
+    }
+
+    private function expenseFindVanished($companyId, array $pA, array $pB, string $field, float $thresholdValue): array
+    {
+        $valuesA = $this->expenseGroupedValues($companyId, $pA, $field);
+        $valuesB = $this->expenseGroupedValues($companyId, $pB, $field);
+
+        $matched = $valuesA->filter(fn($v, $name) => $thresholdValue > 0 && $v >= $thresholdValue && ((float) ($valuesB[$name] ?? 0)) < $v * 0.05)
+            ->map(fn($v, $name) => ['name' => $name, 'value_a' => (float) $v, 'value_b' => (float) ($valuesB[$name] ?? 0)])
+            ->sortByDesc('value_a')->values();
+
+        $total = $matched->sum('value_a');
+        $cumulative = 0;
+        $cutoffCount = 0;
+        foreach ($matched as $item) {
+            if ($total > 0 && $cumulative >= $total * 0.85) break;
+            $cumulative += $item['value_a'];
+            $cutoffCount++;
+        }
+
+        return [
+            'all'          => $matched,
+            'count'        => $matched->count(),
+            'total'        => $total,
+            'cutoff_count' => $cutoffCount,
+        ];
+    }
+
+    // ── Top 100 Expense Items — Rank Movement ─────────────────────
+
+    private function expenseTop100($companyId, array $periods): array
+    {
+        return ['items' => $this->expenseTop100For($companyId, $periods, 'expense_name')];
+    }
+
+    private function expenseTop100For($companyId, array $periods, string $field, int $limit = 100): array
+    {
+        $sortedByPeriod = [];
+        $rankByPeriod   = [];
+        foreach ($periods as $i => $p) {
+            $sorted = $this->expenseGroupedValues($companyId, $p, $field)->filter(fn($v) => $v > 0)->sortDesc();
+            $sortedByPeriod[$i] = $sorted;
+            $rank = [];
+            $pos = 1;
+            foreach ($sorted as $name => $v) { $rank[$name] = $pos++; }
+            $rankByPeriod[$i] = $rank;
+        }
+
+        $columns = [];
+        foreach ($periods as $i => $p) {
+            $topN = $sortedByPeriod[$i]->take($limit);
+            $totalAll = $sortedByPeriod[$i]->sum();
+            $topNShare  = $totalAll > 0 ? round($topN->sum() / $totalAll * 100, 1) : 0;
+            $top10Share = $totalAll > 0 ? round($topN->take(10)->sum() / $totalAll * 100, 1) : 0;
+
+            $rows = [];
+            foreach ($topN as $name => $value) {
+                $row = ['name' => $name, 'value' => (float) $value];
+                foreach ($periods as $j => $pj) {
+                    if ($j !== $i) $row["rank_{$j}"] = $rankByPeriod[$j][$name] ?? null;
+                }
+                $rows[] = $row;
+            }
+            $columns[] = [
+                'period_index'  => $i, 'label' => $p['label'], 'rows' => $rows,
+                'top10_share'   => $top10Share,
+                'top_n_share'   => $topNShare,
+                'total_expense' => $totalAll,
+                'limit'         => $limit,
+            ];
+        }
+        return $columns;
+    }
+
+    // ── Hero cards — Total Expense % change + Expense-to-Revenue
+    //    ratio change (null when a period has no sales data at all) ──
+
+    private function expenseHeroPairs($companyId, array $periods): array
+    {
+        $pairs = [];
+        for ($i = 0; $i < count($periods) - 1; $i++) {
+            $pA = $periods[$i];
+            $pB = $periods[$i + 1];
+            [$cmpA, $cmpB, $wasAligned] = $this->alignForComparison($pA, $pB);
+
+            $aggA = $this->expensePeriodAgg($companyId, $cmpA);
+            $aggB = $this->expensePeriodAgg($companyId, $cmpB);
+
+            $change = $aggB['total_expense'] - $aggA['total_expense'];
+            $pct = $aggA['total_expense'] > 0 ? round($change / $aggA['total_expense'] * 100, 1) : null;
+            $ratioChange = ($aggA['ratio_pct'] !== null && $aggB['ratio_pct'] !== null)
+                ? round($aggB['ratio_pct'] - $aggA['ratio_pct'], 1) : null;
+
+            $pairs[] = [
+                'label_a'      => $cmpA['label'], 'label_b' => $cmpB['label'],
+                'was_aligned'  => $wasAligned,
+                'expense_a'    => $aggA['total_expense'], 'expense_b' => $aggB['total_expense'],
+                'raw_change'   => $change, 'raw_pct' => $pct,
+                'ratio_a'      => $aggA['ratio_pct'], 'ratio_b' => $aggB['ratio_pct'],
+                'ratio_change' => $ratioChange,
+            ];
+        }
+        return $pairs;
+    }
+
+    // ── Expense Concentration by Category — same 85/15 core/tail split
+    //    as Product Concentration, minus the customer columns (no
+    //    customer concept in expense data) ─────────────────────────
+
+    private function expenseConcentration($companyId, array $period): array
+    {
+        $rows = ExpenseData::where('portfolio_company_id', $companyId)
+            ->whereBetween('date', [$period['from'], $period['to']])
+            ->whereNotNull('expense_category')->where('expense_category', '!=', '')
+            ->whereNotNull('expense_name')->where('expense_name', '!=', '')
+            ->selectRaw('expense_category, expense_name, SUM(expense_amount) as value')
+            ->groupBy('expense_category', 'expense_name')->get();
+
+        $result = [];
+        foreach ($rows->groupBy('expense_category') as $category => $catRows) {
+            $itemTotals = $catRows->pluck('value', 'expense_name')->map(fn($v) => (float) $v)->sortDesc();
+            $categoryTotal = $itemTotals->sum();
+
+            $cumulative = 0;
+            $coreItems = [];
+            foreach ($itemTotals as $item => $val) {
+                if ($categoryTotal > 0 && $cumulative >= $categoryTotal * 0.85) break;
+                $coreItems[] = $item;
+                $cumulative += $val;
+            }
+            if (empty($coreItems) && $itemTotals->count() > 0) {
+                $coreItems[] = $itemTotals->keys()->first();
+            }
+            $tailItems = $itemTotals->keys()->diff($coreItems)->values()->all();
+
+            $coreValue = $itemTotals->only($coreItems)->sum();
+            $tailValue = $categoryTotal - $coreValue;
+
+            $result[] = [
+                'category'    => $category,
+                'total_items' => $itemTotals->count(),
+                'total_value' => $categoryTotal,
+                'core_count'  => count($coreItems),
+                'core_value'  => $coreValue,
+                'core_pct'    => $categoryTotal > 0 ? round($coreValue / $categoryTotal * 100, 1) : 0,
+                'tail_count'  => count($tailItems),
+                'tail_value'  => $tailValue,
+                'tail_pct'    => $categoryTotal > 0 ? round($tailValue / $categoryTotal * 100, 1) : 0,
+            ];
+        }
+
+        usort($result, fn($a, $b) => $b['total_value'] <=> $a['total_value']);
+        return $result;
+    }
+
+    // ── Fixed vs Variable — same Pearson-correlation-with-revenue
+    //    classification as the Breakeven page (r ≥ 0.65 = Variable),
+    //    applied per comparison period ───────────────────────────────
+
+    private function expenseFixedVariable($companyId, array $periods): array
+    {
+        $results = [];
+        foreach ($periods as $p) {
+            $revenueByMonth = SalesData::where('portfolio_company_id', $companyId)
+                ->whereBetween('date', [$p['from'], $p['to']])
+                ->selectRaw("DATE_FORMAT(date, '%Y-%m') as month, SUM(net_sales_value) as rev")
+                ->groupBy('month')->pluck('rev', 'month')
+                ->map(fn($v) => (float) $v)->toArray();
+
+            $monthly = ExpenseData::where('portfolio_company_id', $companyId)
+                ->whereBetween('date', [$p['from'], $p['to']])->whereNotNull('expense_name')
+                ->selectRaw("expense_category, expense_name, DATE_FORMAT(date, '%Y-%m') as month, SUM(expense_amount) as total")
+                ->groupBy('expense_category', 'expense_name', 'month')->get();
+
+            $grouped = $monthly->groupBy(fn($r) => $r->expense_category . '|||' . $r->expense_name);
+
+            $fixedTotal = 0;
+            $variableTotal = 0;
+            $catTotals = [];
+
+            foreach ($grouped as $key => $rows) {
+                [$cat, $item] = explode('|||', $key);
+                $expenseVec = [];
+                $revenueVec = [];
+                foreach ($rows as $r) {
+                    if (isset($revenueByMonth[$r->month])) {
+                        $expenseVec[] = (float) $r->total;
+                        $revenueVec[] = $revenueByMonth[$r->month];
+                    }
+                }
+                $correlation = $this->expensePearsonCorrelation($expenseVec, $revenueVec);
+                $itemTotal   = $rows->sum(fn($r) => (float) $r->total);
+                $nature      = ($correlation !== null && $correlation >= 0.65) ? 'variable' : 'fixed';
+
+                if ($nature === 'variable') { $variableTotal += $itemTotal; } else { $fixedTotal += $itemTotal; }
+                $catTotals[$cat]['fixed']    = ($catTotals[$cat]['fixed'] ?? 0) + ($nature === 'fixed' ? $itemTotal : 0);
+                $catTotals[$cat]['variable'] = ($catTotals[$cat]['variable'] ?? 0) + ($nature === 'variable' ? $itemTotal : 0);
+            }
+
+            $byCategory = [];
+            foreach ($catTotals as $cat => $t) {
+                $catTotal = $t['fixed'] + $t['variable'];
+                $byCategory[] = [
+                    'category'     => $cat,
+                    'fixed'        => round($t['fixed'], 2),
+                    'variable'     => round($t['variable'], 2),
+                    'total'        => round($catTotal, 2),
+                    'fixed_pct'    => $catTotal > 0 ? round($t['fixed'] / $catTotal * 100) : 0,
+                    'variable_pct' => $catTotal > 0 ? round($t['variable'] / $catTotal * 100) : 0,
+                ];
+            }
+            usort($byCategory, fn($a, $b) => $b['total'] <=> $a['total']);
+
+            $total = $fixedTotal + $variableTotal;
+            $results[] = [
+                'period'         => $p,
+                // If there's no revenue data at all this period, every
+                // item falls back to "fixed" trivially (matches the
+                // Breakeven page's own caveat) — surfaced here so the
+                // UI can show that explicitly instead of implying a
+                // real 100%-fixed cost structure.
+                'has_revenue'    => count($revenueByMonth) > 0,
+                'fixed_total'    => round($fixedTotal, 2),
+                'variable_total' => round($variableTotal, 2),
+                'fixed_pct'      => $total > 0 ? round($fixedTotal / $total * 100, 1) : 0,
+                'variable_pct'   => $total > 0 ? round($variableTotal / $total * 100, 1) : 0,
+                'by_category'    => $byCategory,
+            ];
+        }
+        return $results;
+    }
+
+    private function expensePearsonCorrelation(array $x, array $y): ?float
+    {
+        $n = count($x);
+        if ($n < 3 || count($y) !== $n) return null;
+        $meanX = array_sum($x) / $n;
+        $meanY = array_sum($y) / $n;
+        $num = 0; $denX = 0; $denY = 0;
+        for ($i = 0; $i < $n; $i++) {
+            $dx = $x[$i] - $meanX;
+            $dy = $y[$i] - $meanY;
+            $num  += $dx * $dy;
+            $denX += $dx * $dx;
+            $denY += $dy * $dy;
+        }
+        if ($denX <= 0 || $denY <= 0) return null;
+        return $num / sqrt($denX * $denY);
+    }
+
+    // ── Volatility & Outliers — reuses the Reports page's IQR method,
+    //    surfaced per comparison period instead of per single range ──
+
+    private function expenseVolatility($companyId, array $periods): array
+    {
+        $results = [];
+        foreach ($periods as $p) {
+            $monthly = ExpenseData::where('portfolio_company_id', $companyId)
+                ->whereBetween('date', [$p['from'], $p['to']])
+                ->selectRaw("expense_category, expense_name, DATE_FORMAT(date, '%Y-%m') as month, SUM(expense_amount) as monthly_total")
+                ->groupBy('expense_category', 'expense_name', 'month')->get();
+
+            $grouped = $monthly->groupBy(fn($r) => $r->expense_category . '|||' . $r->expense_name);
+            $items = [];
+            foreach ($grouped as $key => $rows) {
+                [$cat, $item] = explode('|||', $key);
+                $values = $rows->pluck('monthly_total')->map(fn($v) => (float) $v)->sort()->values();
+                $count = $values->count();
+                if ($count < 4) continue; // IQR needs enough months to be meaningful
+
+                $avg = $values->avg();
+                $sortedVals = $values->toArray();
+                $q1 = $this->expensePercentile($sortedVals, 25);
+                $q3 = $this->expensePercentile($sortedVals, 75);
+                $iqr = $q3 - $q1;
+                $lowerFence = $q1 - 1.5 * $iqr;
+                $upperFence = $q3 + 1.5 * $iqr;
+
+                $outlierMonths = $rows->filter(fn($r) =>
+                    (float) $r->monthly_total > $upperFence || (float) $r->monthly_total < $lowerFence
+                )->map(fn($r) => ['month' => $r->month, 'value' => (float) $r->monthly_total])->values();
+
+                if ($outlierMonths->count() === 0) continue;
+
+                $items[] = [
+                    'category'       => $cat,
+                    'item'           => $item,
+                    'avg'            => round($avg, 2),
+                    'min'            => round($values->min(), 2),
+                    'max'            => round($values->max(), 2),
+                    'outlier_count'  => $outlierMonths->count(),
+                    'outlier_months' => $outlierMonths->all(),
+                ];
+            }
+            usort($items, fn($a, $b) => $b['outlier_count'] <=> $a['outlier_count'] ?: $b['max'] <=> $a['max']);
+
+            $results[] = [
+                'period'              => $p,
+                'items_with_outliers' => count($items),
+                'items'               => array_slice($items, 0, 10), // most volatile first, shown by default
+            ];
+        }
+        return $results;
+    }
+
+    private function expensePercentile(array $sortedValues, float $pct): float
+    {
+        $count = count($sortedValues);
+        if ($count === 0) return 0;
+        if ($count === 1) return $sortedValues[0];
+        $rank = ($pct / 100) * ($count - 1);
+        $low  = (int) floor($rank);
+        $high = (int) ceil($rank);
+        if ($low === $high) return $sortedValues[$low];
+        $fraction = $rank - $low;
+        return $sortedValues[$low] + $fraction * ($sortedValues[$high] - $sortedValues[$low]);
+    }
+
+    // ── Key Takeaways ──────────────────────────────────────────────
+
+    private function expenseComputeTakeaways(array $zoomIn, array $vanishing, array $fixedVariable): array
+    {
+        $items = [];
+        foreach ($zoomIn as $pair) {
+            if (count($pair['category_breakdown'])) {
+                $topCat = $pair['category_breakdown'][0];
+                $totalAbs = collect($pair['category_breakdown'])->sum(fn($r) => abs($r['change']));
+                $catPct = $totalAbs > 0 ? round(abs($topCat['change']) / $totalAbs * 100, 1) : 0;
+                $items[] = [
+                    // Unlike Sales (where growth is good/green), a
+                    // rising expense category is flagged amber/red.
+                    'tone' => $topCat['change'] >= 0 ? 'red' : 'green',
+                    'stat' => "{$catPct}%",
+                    'text' => "of {$pair['period_a']['label']} → {$pair['period_b']['label']} category movement sits in \"{$topCat['label']}\" alone (" . $this->fmtM($topCat['change']) . ').',
+                ];
+            }
+        }
+
+        foreach ($vanishing as $pair) {
+            if ($pair['items_count'] > 0) {
+                $items[] = [
+                    'tone' => 'green', // an expense NOT repeating is a good thing
+                    'stat' => $this->fmtM($pair['items_total']),
+                    'text' => "in {$pair['period_a']['label']} expense ({$pair['items_count']} item(s)) did not repeat by {$pair['period_b']['label']}.",
+                ];
+            }
+        }
+
+        foreach ($fixedVariable as $fv) {
+            if ($fv['has_revenue']) {
+                $items[] = [
+                    'tone' => 'amber',
+                    'stat' => "{$fv['variable_pct']}%",
+                    'text' => "of {$fv['period']['label']} expense moves with revenue (Variable) vs {$fv['fixed_pct']}% Fixed.",
+                ];
+            }
+        }
+
+        $items = array_slice($items, 0, 10);
+        foreach ($items as $i => &$item) {
+            $item['key'] = "expense_takeaway_{$i}";
+        }
+        unset($item);
+        return $items;
+    }
+
+    // ── Narratives ─────────────────────────────────────────────────
+
+    private function expenseNarrativeHero($heroPairs): string
+    {
+        if (empty($heroPairs)) return 'Add at least two periods to generate a summary.';
+
+        $up   = collect($heroPairs)->where('raw_pct', '>=', 0)->count();
+        $down = count($heroPairs) - $up;
+        $biggest = collect($heroPairs)->sortByDesc(fn($p) => abs($p['raw_pct'] ?? 0))->first();
+        $dir = ($biggest['raw_pct'] ?? 0) >= 0 ? 'an increase' : 'a decrease';
+
+        $txt = 'Across the ' . count($heroPairs) . ' period-over-period comparison(s) shown, total expense rose in '
+             . "{$up} and fell in {$down}. ";
+        $txt .= "The sharpest move was {$biggest['label_a']} → {$biggest['label_b']}, {$dir} of " . abs($biggest['raw_pct']) . '% ('
+             . $this->fmtM($biggest['expense_a']) . ' to ' . $this->fmtM($biggest['expense_b']) . ').';
+
+        if ($biggest['ratio_change'] !== null) {
+            $ratioDir = $biggest['ratio_change'] >= 0 ? 'rose' : 'fell';
+            $txt .= " Expense-to-revenue ratio {$ratioDir} from {$biggest['ratio_a']}% to {$biggest['ratio_b']}% over that same move.";
+        }
+
+        return $txt;
+    }
+
+    private function expenseNarrativeZoomOut($companyId, array $periods, array $rows): string
+    {
+        if (count($rows) < 2) return 'Add at least two periods to generate a comparison.';
+
+        $sentences = [];
+        for ($i = 0; $i < count($periods) - 1; $i++) {
+            $pA = $periods[$i];
+            $pB = $periods[$i + 1];
+            [$cmpA, $cmpB, $wasAligned] = $this->alignForComparison($pA, $pB);
+
+            $aggA = $this->expensePeriodAgg($companyId, $cmpA);
+            $aggB = $this->expensePeriodAgg($companyId, $cmpB);
+
+            $change = $aggB['total_expense'] - $aggA['total_expense'];
+            $pct = $aggA['total_expense'] > 0 ? round(abs($change) / $aggA['total_expense'] * 100, 1) : null;
+            $direction = $change >= 0 ? 'grew' : 'declined';
+            $pctText = $pct !== null ? "{$pct}%" : 'materially';
+
+            $prefix = $wasAligned ? 'Comparing the same calendar months for both periods — ' : '';
+            $txt = "{$prefix}Total expense {$direction} {$pctText} from {$cmpA['label']} (" . $this->fmtM($aggA['total_expense'])
+                 . ") to {$cmpB['label']} (" . $this->fmtM($aggB['total_expense']) . ').';
+
+            if ($aggA['ratio_pct'] !== null && $aggB['ratio_pct'] !== null) {
+                $txt .= " Relative to revenue, that's {$aggA['ratio_pct']}% → {$aggB['ratio_pct']}%.";
+            }
+
+            $sentences[] = $txt;
+        }
+
+        return implode(' ', $sentences);
+    }
+
+    private function expenseNarrativeZoomIn(array $pair): string
+    {
+        $labelA = $pair['period_a']['label'];
+        $labelB = $pair['period_b']['label'];
+        $parts = [];
+
+        if (count($pair['category_breakdown'])) {
+            $topCat = $pair['category_breakdown'][0];
+            $totalAbs = collect($pair['category_breakdown'])->sum(fn($r) => abs($r['change']));
+            $catPct = $totalAbs > 0 ? round(abs($topCat['change']) / $totalAbs * 100, 1) : 0;
+            $catDir = $topCat['change'] >= 0 ? 'grew' : 'declined';
+            $parts[] = "By category, \"{$topCat['label']}\" moved the most from {$labelA} to {$labelB} ({$catDir} " . $this->fmtM($topCat['change']) . ", {$catPct}% of all category movement shown).";
+        }
+
+        if (count($pair['item_breakdown'])) {
+            $topItem = $pair['item_breakdown'][0];
+            $itemDir = $topItem['change'] >= 0 ? 'grew' : 'declined';
+            $parts[] = "The single biggest expense-item move was \"{$topItem['label']}\", which {$itemDir} by " . $this->fmtM(abs($topItem['change'])) . '.';
+        }
+
+        return implode(' ', $parts) ?: "No notable movement between {$labelA} and {$labelB}.";
+    }
+
+    private function expenseNarrativeVanishing(array $pair): string
+    {
+        $labelA = $pair['compare_period_a']['label'];
+        $labelB = $pair['compare_period_b']['label'];
+        $thresholdPct = $pair['threshold_pct'];
+
+        if ($pair['items_count'] > 0) {
+            $top = $pair['items'][0];
+            return "{$pair['items_count']} expense item(s) that were meaningful in {$labelA} (at least {$thresholdPct}% of that period's total expense) shrank to under 5% of that by {$labelB}, representing "
+                . $this->fmtM($pair['items_total']) . ' not repeated — the largest, "' . $top['name'] . '", went from '
+                . $this->fmtM($top['value_a']) . ' to ' . $this->fmtM($top['value_b']) . '. Worth checking whether this reflects a vendor contract ending or simply a gap in the uploaded data.';
+        }
+
+        return "No expense items that were meaningful in {$labelA} disappeared by {$labelB}.";
+    }
+
+    private function expenseNarrativeTopRanked(array $topRanked): string
+    {
+        $cols = $topRanked['items'] ?? [];
+        if (count($cols) < 1) return 'Add at least two periods to generate a summary.';
+
+        $first = $cols[0];
+        $last  = $cols[count($cols) - 1];
+        $firstNames = collect($first['rows'])->pluck('name');
+        $lastNames  = collect($last['rows'])->pluck('name');
+        $newEntrants = $lastNames->diff($firstNames)->count();
+        $dropped     = $firstNames->diff($lastNames)->count();
+        $limit = $last['limit'] ?? 100;
+
+        $txt = "The Top {$limit} expense items in {$last['label']} account for {$last['top_n_share']}% of total expense, with the Top 10 alone accounting for {$last['top10_share']}%.";
+        if (count($cols) > 1) {
+            $txt .= " Compared to {$first['label']}, {$newEntrants} new item(s) entered the Top {$limit} and {$dropped} dropped out.";
+        }
+        return $txt;
+    }
+
+    private function expenseNarrativeConcentration(array $concentration): string
+    {
+        if (empty($concentration)) return 'No expense data available for this comparison.';
+
+        $latest = end($concentration);
+        $cats = collect($latest['categories']);
+        if ($cats->isEmpty()) return "No categorized expense data found in {$latest['period']['label']}.";
+
+        $shareOf = fn($c) => $c['total_items'] > 0 ? $c['core_count'] / $c['total_items'] * 100 : 0;
+        $totalItems = $cats->sum('total_items');
+        $totalCore  = $cats->sum('core_count');
+        $avgSharePct = $totalItems > 0 ? round($totalCore / $totalItems * 100, 1) : 0;
+        $mostConcentrated = $cats->sortBy($shareOf)->first();
+        $mostSpread       = $cats->sortByDesc($shareOf)->first();
+
+        return "In {$latest['period']['label']}, just {$avgSharePct}% of all expense items across every category account for ~85% of that category's spend on average. "
+             . "\"{$mostConcentrated['category']}\" is the most concentrated — only {$mostConcentrated['core_count']} of its {$mostConcentrated['total_items']} items drive the bulk of spend. "
+             . "\"{$mostSpread['category']}\" is the most spread out, needing {$mostSpread['core_count']} of {$mostSpread['total_items']} items to reach that same ~85%.";
+    }
+
+    private function expenseNarrativeFixedVariable(array $fixedVariable): string
+    {
+        if (empty($fixedVariable)) return 'No expense data available for this comparison.';
+
+        $latest = end($fixedVariable);
+        if (! $latest['has_revenue']) {
+            return "No sales data is available for {$latest['period']['label']}, so expenses can't be split into Fixed vs Variable (that classification is based on correlation with revenue) — everything defaults to Fixed until sales data is uploaded for this period.";
+        }
+
+        $txt = "In {$latest['period']['label']}, {$latest['variable_pct']}% of expense moves with revenue (Variable) and {$latest['fixed_pct']}% does not (Fixed).";
+        $first = $fixedVariable[0];
+        if (count($fixedVariable) > 1 && $first['has_revenue']) {
+            $change = round($latest['variable_pct'] - $first['variable_pct'], 1);
+            $dir = $change >= 0 ? 'up' : 'down';
+            $txt .= " That's {$dir} " . abs($change) . " point(s) from {$first['period']['label']} ({$first['variable_pct']}% Variable).";
+        }
+        return $txt;
+    }
+
+    private function expenseNarrativeVolatility(array $volatility): string
+    {
+        if (empty($volatility)) return 'No expense data available for this comparison.';
+
+        $latest = end($volatility);
+        if ($latest['items_with_outliers'] === 0) {
+            return "No unusually volatile expense items found in {$latest['period']['label']} (using the IQR method, which flags months that fall well outside an item's typical range).";
+        }
+
+        $top = $latest['items'][0];
+        return "{$latest['items_with_outliers']} expense item(s) had at least one unusually large or small month in {$latest['period']['label']}. "
+             . "The most volatile was \"{$top['item']}\" ({$top['category']}), with {$top['outlier_count']} outlier month(s) against a typical average of " . $this->fmtM($top['avg']) . '.';
     }
 }

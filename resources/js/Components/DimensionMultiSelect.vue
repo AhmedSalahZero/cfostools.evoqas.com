@@ -37,11 +37,11 @@
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
         </svg>
-        All items included — report will show Top 300 + Others
+        All items included — report will show Top 500 + Others
       </span>
       <span v-else class="text-mp-muted text-xs">None selected — Select All to include all {{ topItems.length }} items</span>
       <span v-if="!search.trim() && hasMore" class="text-mp-muted text-xs">
-        &nbsp;· showing top 300 by value here, search to find others
+        &nbsp;· showing top 500 by value here, search to find others
       </span>
     </div>
   </div>

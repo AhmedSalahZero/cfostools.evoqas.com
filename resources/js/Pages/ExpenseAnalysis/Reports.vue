@@ -44,7 +44,7 @@
               <p class="text-xs font-semibold text-white uppercase tracking-widest mb-4">Report Type</p>
               <div class="space-y-2">
                 <button v-for="rt in reportTypes" :key="rt.value"
-                  @click="form.report_type = rt.value"
+                  @click="selectReportType(rt.value)"
                   :class="[
                     'w-full text-left px-4 py-3 rounded-lg text-sm transition-colors',
                     form.report_type === rt.value
@@ -56,11 +56,9 @@
               </div>
             </div>
 
-            <!-- Date Range -->
-            <div class="bg-mp-card rounded-xl border border-mp-border p-5">
-              <p class="text-xs font-semibold text-white uppercase tracking-widest mb-4">
-                {{ form.report_type === 'period_comparison' ? 'Period 1' : 'Date Range' }}
-              </p>
+            <!-- Date Range (all report types except Period Comparison) -->
+            <div v-if="form.report_type !== 'period_comparison'" class="bg-mp-card rounded-xl border border-mp-border p-5">
+              <p class="text-xs font-semibold text-white uppercase tracking-widest mb-4">Date Range</p>
               <div class="space-y-3">
                 <div>
                   <label class="block text-xs text-mp-muted mb-1">From</label>
@@ -75,19 +73,37 @@
               </div>
             </div>
 
-            <!-- Period 2 (only for Period Comparison) -->
+            <!-- Number of Periods (Period Comparison only) -->
             <div v-if="form.report_type === 'period_comparison'" class="bg-mp-card rounded-xl border border-mp-border p-5">
-              <p class="text-xs font-semibold text-white uppercase tracking-widest mb-4">Period 2</p>
-              <div class="space-y-3">
-                <div>
-                  <label class="block text-xs text-mp-muted mb-1">Compare From</label>
-                  <input type="date" v-model="form.compare_from" :min="minDate" :max="maxDate"
-                    class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-teal"/>
-                </div>
-                <div>
-                  <label class="block text-xs text-mp-muted mb-1">Compare To</label>
-                  <input type="date" v-model="form.compare_to" :min="minDate" :max="maxDate"
-                    class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-teal"/>
+              <p class="text-xs font-semibold text-white uppercase tracking-widest mb-3">Number of Periods</p>
+              <div class="grid grid-cols-4 gap-2">
+                <button v-for="n in [2, 3, 4, 5]" :key="n" @click="setPeriodCount(n)"
+                  :class="[
+                    'py-2 rounded-lg text-sm font-medium transition-colors',
+                    periods.length === n
+                      ? 'bg-mp-teal text-mp-text-secondary'
+                      : 'bg-mp-card-hover text-mp-text hover:bg-mp-page'
+                  ]">
+                  {{ n }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Periods (Period Comparison only) -->
+            <div v-if="form.report_type === 'period_comparison'" class="space-y-4">
+              <div v-for="(p, idx) in periods" :key="idx" class="bg-mp-card rounded-xl border border-mp-border p-5">
+                <p class="text-xs font-semibold text-white uppercase tracking-widest mb-4">Period {{ idx + 1 }}</p>
+                <div class="space-y-3">
+                  <div>
+                    <label class="block text-xs text-mp-muted mb-1">From</label>
+                    <input type="date" v-model="p.from" :min="minDate" :max="maxDate"
+                      class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-teal"/>
+                  </div>
+                  <div>
+                    <label class="block text-xs text-mp-muted mb-1">To</label>
+                    <input type="date" v-model="p.to" :min="minDate" :max="maxDate"
+                      class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-teal"/>
+                  </div>
                 </div>
               </div>
             </div>
@@ -282,9 +298,9 @@
                         Category / Item
                       </th>
                       <!-- Period columns — value + GR% sub-columns -->
-                      <th v-for="m in result.months" :key="m"
+                      <th v-for="p in result.periods" :key="p"
                         class="text-center text-xs font-semibold text-white uppercase tracking-widest px-3 py-3 whitespace-nowrap min-w-[130px]">
-                        {{ formatPeriod(m) }}
+                        {{ formatPeriod(p) }}
                       </th>
                       <!-- Total at END — same as Sales two_factors_trend -->
                       <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-4 py-3 min-w-[100px]">
@@ -293,28 +309,28 @@
                     </tr>
                   </thead>
                   <tbody>
-                    <template v-for="cat in result.rows" :key="cat.category">
+                    <template v-for="cat in result.rows" :key="cat.label">
 
                       <!-- ── CATEGORY ROW (collapsible) ── -->
                       <tr class="border-b border-mp-border bg-mp-teal-subtle/30 cursor-pointer hover:bg-mp-teal-subtle/50 transition-colors"
-                        @click="toggleCat(cat.category)">
+                        @click="toggleCat(cat.label)">
                         <td class="px-5 py-2.5 sticky left-0 bg-mp-teal-subtle/30 z-10">
                           <div class="flex items-center gap-2">
                             <svg class="w-3 h-3 text-white transition-transform flex-shrink-0"
-                              :class="expandedCats.has(cat.category) ? 'rotate-90' : ''"
+                              :class="expandedCats.has(cat.label) ? 'rotate-90' : ''"
                               fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                             </svg>
-                            <span class="text-mp-text-secondary font-semibold text-xs">{{ cat.category }}</span>
+                            <span class="text-mp-text-secondary font-semibold text-xs">{{ cat.label }}</span>
                           </div>
                         </td>
                         <!-- Period cells for category totals -->
-                        <td v-for="(m, mi) in result.months" :key="m" class="px-3 py-2.5 text-center">
-                          <div class="text-mp-text-secondary text-xs font-semibold">{{ fmt(cat.months[m] || 0) }}</div>
+                        <td v-for="(p, pi) in result.periods" :key="p" class="px-3 py-2.5 text-center">
+                          <div class="text-mp-text-secondary text-xs font-semibold">{{ fmt(cat.cells[p]?.value || 0) }}</div>
                           <div class="text-xs mt-0.5"
-                            :class="getCatGR(cat, result.months, mi) >= 0 ? 'text-mp-success' : 'text-mp-danger'">
-                            <template v-if="mi > 0">
-                              [GR {{ getCatGR(cat, result.months, mi) >= 0 ? '+' : '' }}{{ getCatGR(cat, result.months, mi) }}%]
+                            :class="(cat.cells[p]?.gr ?? 0) >= 0 ? 'text-mp-success' : 'text-mp-danger'">
+                            <template v-if="pi > 0">
+                              [GR {{ cat.cells[p]?.gr >= 0 ? '+' : '' }}{{ cat.cells[p]?.gr ?? 0 }}%]
                             </template>
                             <template v-else><span class="text-mp-muted">—</span></template>
                           </div>
@@ -324,18 +340,18 @@
                       </tr>
 
                       <!-- ── ITEM ROWS (expanded) ── -->
-                      <template v-if="expandedCats.has(cat.category)">
-                        <tr v-for="item in cat.items" :key="item.item"
+                      <template v-if="expandedCats.has(cat.label)">
+                        <tr v-for="item in cat.children" :key="item.label"
                           class="border-b border-mp-border hover:bg-mp-card-hover/30 transition-colors">
                           <td class="px-5 py-2 pl-10 sticky left-0 bg-mp-card z-10 text-mp-text text-xs">
-                            {{ item.item }}
+                            {{ item.label }}
                           </td>
                           <!-- Period cells for item -->
-                          <td v-for="(m, mi) in result.months" :key="m" class="px-3 py-2 text-center">
-                            <div class="text-mp-text text-xs">{{ item.months[m] > 0 ? fmt(item.months[m]) : '—' }}</div>
-                            <div v-if="item.months[m] > 0 && mi > 0" class="text-xs mt-0.5"
-                              :class="getItemGR(item, result.months, mi) >= 0 ? 'text-mp-success' : 'text-mp-danger'">
-                              [{{ getItemGR(item, result.months, mi) >= 0 ? '+' : '' }}{{ getItemGR(item, result.months, mi) }}%]
+                          <td v-for="p in result.periods" :key="p" class="px-3 py-2 text-center">
+                            <div class="text-mp-text text-xs">{{ item.cells[p]?.value > 0 ? fmt(item.cells[p].value) : '—' }}</div>
+                            <div v-if="item.cells[p]?.value > 0 && item.cells[p]?.gr !== 0" class="text-xs mt-0.5"
+                              :class="item.cells[p].gr >= 0 ? 'text-mp-success' : 'text-mp-danger'">
+                              [{{ item.cells[p].gr >= 0 ? '+' : '' }}{{ item.cells[p].gr }}%]
                             </div>
                           </td>
                           <!-- Total at end -->
@@ -352,50 +368,51 @@
                    PERIOD COMPARISON — Same as Sales reports period_comparison
               ═══════════════════════════════════════════════════════════ -->
               <div v-if="form.report_type === 'period_comparison'">
-                <div class="bg-mp-card rounded-xl border border-mp-border overflow-hidden">
-                  <table class="w-full text-sm">
+                <div class="bg-mp-card rounded-xl border border-mp-border overflow-x-auto">
+                  <table class="w-full text-sm" style="min-width: max-content">
                     <thead>
                       <tr class="bg-mp-teal-subtle/40 border-b border-mp-border">
-                        <th class="text-left text-xs font-semibold text-white uppercase px-6 py-3">
+                        <th class="text-left text-xs font-semibold text-white uppercase px-6 py-3 sticky left-0 bg-mp-teal-subtle/60 z-10">
                           {{ compareByLabel }}
                         </th>
-                        <th class="text-right text-xs font-semibold text-white uppercase px-6 py-3">
-                          Period 1<br>
-                          <span class="font-normal text-mp-muted text-xs">{{ result.period1.from }} → {{ result.period1.to }}</span>
+                        <th v-for="(p, pi) in result.periods" :key="pi"
+                          class="text-right text-xs font-semibold text-white uppercase px-6 py-3 min-w-[150px]">
+                          Period {{ pi + 1 }}<br>
+                          <span class="font-normal text-mp-muted text-xs">{{ p.from }} → {{ p.to }}</span>
+                          <template v-if="pi > 0"><br><span class="font-normal text-mp-muted text-xs">vs Period {{ pi }}</span></template>
                         </th>
-                        <th class="text-right text-xs font-semibold text-white uppercase px-6 py-3">
-                          Period 2<br>
-                          <span class="font-normal text-mp-muted text-xs">{{ result.period2.from }} → {{ result.period2.to }}</span>
-                        </th>
-                        <th class="text-right text-xs font-semibold text-white uppercase px-6 py-3">Change %</th>
                       </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-800">
                       <tr v-for="(row, i) in result.rows" :key="row.label"
                         :class="i % 2 === 0 ? 'bg-mp-card' : 'bg-mp-card-hover/40'"
                         class="hover:bg-mp-teal-subtle/20 transition-colors">
-                        <td class="px-6 py-3 text-mp-text-secondary font-medium">{{ row.label }}</td>
-                        <td class="px-6 py-3 text-right text-mp-text">{{ fmt(row.period1) }}</td>
-                        <td class="px-6 py-3 text-right text-mp-text">{{ fmt(row.period2) }}</td>
-                        <td class="px-6 py-3 text-right">
-                          <span v-if="row.change !== null"
-                            :class="row.change >= 0 ? 'text-mp-danger' : 'text-mp-success'"
-                            class="font-semibold">
-                            {{ row.change >= 0 ? '+' : '' }}{{ row.change }}%
-                          </span>
-                          <span v-else class="text-mp-muted">N/A</span>
+                        <td class="px-6 py-3 text-mp-text-secondary font-medium sticky left-0" :class="i % 2 === 0 ? 'bg-mp-card' : 'bg-mp-card-hover'">{{ row.label }}</td>
+                        <td v-for="(v, pi) in row.values" :key="pi" class="px-6 py-3 text-right text-mp-text">
+                          {{ fmt(v) }}
+                          <div v-if="pi > 0" class="text-xs mt-0.5">
+                            <span v-if="row.changes[pi - 1] !== null"
+                              :class="row.changes[pi - 1] >= 0 ? 'text-mp-danger' : 'text-mp-success'"
+                              class="font-semibold">
+                              {{ row.changes[pi - 1] >= 0 ? '+' : '' }}{{ row.changes[pi - 1] }}%
+                            </span>
+                            <span v-else class="text-mp-muted">N/A</span>
+                          </div>
                         </td>
                       </tr>
                     </tbody>
                     <tfoot>
                       <tr class="border-t-2 border-mp-border bg-mp-card-hover/60">
-                        <td class="px-6 py-3 text-mp-text-secondary font-bold">Total</td>
-                        <td class="px-6 py-3 text-right text-mp-text-secondary font-bold">{{ fmt(result.rows.reduce((s,r) => s + r.period1, 0)) }}</td>
-                        <td class="px-6 py-3 text-right text-mp-text-secondary font-bold">{{ fmt(result.rows.reduce((s,r) => s + r.period2, 0)) }}</td>
-                        <td class="px-6 py-3 text-right">
-                          <span :class="periodTotalChange >= 0 ? 'text-mp-danger' : 'text-mp-success'" class="font-bold">
-                            {{ periodTotalChange >= 0 ? '+' : '' }}{{ periodTotalChange }}%
-                          </span>
+                        <td class="px-6 py-3 text-mp-text-secondary font-bold sticky left-0 bg-mp-card-hover/60">Total</td>
+                        <td v-for="(p, pi) in result.periods" :key="pi" class="px-6 py-3 text-right text-mp-text-secondary font-bold">
+                          {{ fmt(periodColumnTotal(pi)) }}
+                          <div v-if="pi > 0" class="text-xs mt-0.5 font-bold">
+                            <span v-if="periodColumnChange(pi) !== null"
+                              :class="periodColumnChange(pi) >= 0 ? 'text-mp-danger' : 'text-mp-success'">
+                              {{ periodColumnChange(pi) >= 0 ? '+' : '' }}{{ periodColumnChange(pi) }}%
+                            </span>
+                            <span v-else class="text-mp-muted font-normal">N/A</span>
+                          </div>
                         </td>
                       </tr>
                     </tfoot>
@@ -435,7 +452,7 @@
                         <td class="px-5 py-3 text-right text-mp-danger">{{ fmt(row.max) }}</td>
                         <td class="px-5 py-3 text-center w-28">
                           <span v-if="row.outlier_count > 0"
-                            class="inline-block whitespace-nowrap text-xs bg-mp-warning text-mp-warning border border-mp-warning px-2.5 py-1 rounded-full font-semibold">
+                            class="inline-block whitespace-nowrap text-xs bg-mp-warning/15 text-mp-warning border border-mp-warning/50 px-2.5 py-1 rounded-full font-semibold">
                             {{ row.outlier_count }} outlier{{ row.outlier_count > 1 ? 's' : '' }}
                           </span>
                           <span v-else class="text-xs text-mp-muted">—</span>
@@ -446,7 +463,7 @@
                         <td colspan="6" class="px-10 pb-3">
                           <div class="flex flex-wrap gap-2">
                             <span v-for="o in row.outlier_months" :key="o.month"
-                              class="text-xs bg-mp-warning border border-mp-warning text-mp-warning px-3 py-1 rounded-full">
+                              class="text-xs bg-mp-warning/15 border border-mp-warning/50 text-mp-warning px-3 py-1 rounded-full">
                               {{ formatMonth(o.month) }}: {{ fmt(o.value) }}
                             </span>
                           </div>
@@ -492,14 +509,40 @@ const form = ref({
   date_from:    props.minDate ?? '',
   date_to:      props.maxDate ?? '',
   category:     '',
-  compare_from: '',
-  compare_to:   '',
   compare_by:   'category',
   period:       'monthly',
 })
 
+// Period Comparison — 2 to 5 independent {from, to} periods.
+const periods = ref([
+  { from: props.minDate ?? '', to: props.maxDate ?? '' },
+  { from: '', to: '' },
+])
+
+function setPeriodCount(n) {
+  if (periods.value.length < n) {
+    while (periods.value.length < n) periods.value.push({ from: '', to: '' })
+  } else {
+    periods.value = periods.value.slice(0, n)
+  }
+}
+
 const loading          = ref(false)
 const result           = ref(null)
+
+// Switching report type must clear any previously-run result — otherwise
+// the results panel tries to render the new report type's layout using
+// leftover data from the old report type, which crashes (e.g. Period
+// Comparison expects result.periods/rows, but a Category Breakdown
+// result has neither).
+function selectReportType(value) {
+  form.value.report_type = value
+  result.value = null
+  if (value === 'period_comparison' && !periods.value[0].from && !periods.value[0].to) {
+    periods.value[0] = { from: form.value.date_from, to: form.value.date_to }
+  }
+}
+
 const totalExpense     = ref(0)
 const totalRevenue     = ref(0)
 const expandedCats     = ref(new Set())
@@ -522,28 +565,18 @@ const compareByLabel = computed(() => ({
   item: 'Expense Item',
 })[form.value.compare_by] ?? 'Label')
 
-const periodTotalChange = computed(() => {
+// Column total for period index `pi`, summed across every row.
+function periodColumnTotal(pi) {
   if (!result.value?.rows) return 0
-  const t1 = result.value.rows.reduce((s, r) => s + (r.period1 ?? 0), 0)
-  const t2 = result.value.rows.reduce((s, r) => s + (r.period2 ?? 0), 0)
-  return t1 > 0 ? Math.round((t2 - t1) / t1 * 1000) / 10 : 0
-})
-
-// ─── GR% helpers for Trend table (calculated in Vue, not backend) ───
-function getCatGR(cat, months, mi) {
-  if (mi === 0) return 0
-  const prev = cat.months[months[mi - 1]] || 0
-  const curr = cat.months[months[mi]] || 0
-  if (prev === 0) return 0
-  return Math.round((curr - prev) / prev * 1000) / 10
+  return result.value.rows.reduce((s, r) => s + (r.values[pi] ?? 0), 0)
 }
 
-function getItemGR(item, months, mi) {
-  if (mi === 0) return 0
-  const prev = item.months[months[mi - 1]] || 0
-  const curr = item.months[months[mi]] || 0
-  if (prev === 0) return 0
-  return Math.round((curr - prev) / prev * 1000) / 10
+// % change of period `pi`'s total vs the immediately preceding period's total.
+function periodColumnChange(pi) {
+  if (pi === 0) return null
+  const prev = periodColumnTotal(pi - 1)
+  const curr = periodColumnTotal(pi)
+  return prev > 0 ? Math.round((curr - prev) / prev * 1000) / 10 : null
 }
 
 async function loadChartJs() {
@@ -584,24 +617,14 @@ function renderComparisonChart(data) {
     type: 'bar',
     data: {
       labels: rows.map(r => r.label),
-      datasets: [
-        {
-          label: `Period 1 (${data.period1.from} → ${data.period1.to})`,
-          data: rows.map(r => r.period1),
-          backgroundColor: alpha('#00b4c8', 0.75),
-          borderColor: '#00b4c8',
-          borderWidth: 1,
-          borderRadius: 3,
-        },
-        {
-          label: `Period 2 (${data.period2.from} → ${data.period2.to})`,
-          data: rows.map(r => r.period2),
-          backgroundColor: alpha('#10b981', 0.75),
-          borderColor: '#10b981',
-          borderWidth: 1,
-          borderRadius: 3,
-        }
-      ]
+      datasets: data.periods.map((p, pi) => ({
+        label: `Period ${pi + 1} (${p.from} → ${p.to})`,
+        data: rows.map(r => r.values[pi]),
+        backgroundColor: alpha(COLORS[pi % COLORS.length], 0.75),
+        borderColor: COLORS[pi % COLORS.length],
+        borderWidth: 1,
+        borderRadius: 3,
+      })),
     },
     options: {
       responsive: true,
@@ -623,13 +646,28 @@ function renderComparisonChart(data) {
   })
 }
 
+// Period Comparison uses the `periods` array instead of a single
+// date_from/date_to, but we still send date_from/date_to (mirroring
+// Period 1) since the backend uses those for the header's total.
+function buildPayload() {
+  if (form.value.report_type === 'period_comparison') {
+    return {
+      ...form.value,
+      date_from: periods.value[0]?.from || '',
+      date_to:   periods.value[0]?.to || '',
+      periods:   periods.value,
+    }
+  }
+  return { ...form.value }
+}
+
 async function runReport() {
   loading.value = true
   expandedCats.value = new Set()
   expandedOutliers.value = new Set()
   result.value = null
   try {
-    const res = await axios.post(`/companies/${props.company.id}/expenses/reports/run`, form.value)
+    const res = await axios.post(`/companies/${props.company.id}/expenses/reports/run`, buildPayload())
     result.value       = res.data.result
     totalExpense.value = res.data.total_expense
     totalRevenue.value = res.data.total_revenue
@@ -653,7 +691,11 @@ function toggleOutlier(i) {
 }
 
 async function exportReport() {
-  const params = new URLSearchParams({ ...form.value })
+  const payload = buildPayload()
+  // URLSearchParams can't serialize a nested array as-is — encode it as JSON,
+  // matching what the backend already expects for the `periods` field.
+  if (payload.periods) payload.periods = JSON.stringify(payload.periods)
+  const params = new URLSearchParams(payload)
   window.location.href = `/companies/${props.company.id}/expenses/export-report?${params}`
 }
 

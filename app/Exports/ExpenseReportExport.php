@@ -47,6 +47,7 @@ class ExpenseReportExport implements FromArray, WithHeadings, WithStyles, WithCo
             'subcategory_breakdown' => 'Sub-Category Breakdown',
             'item_breakdown'        => 'Item Breakdown',
             'min_avg_max'           => 'Min Avg Max',
+            'period_comparison'     => 'Period Comparison',
         ];
         return $labels[$this->reportType] ?? 'Report';
     }
@@ -58,8 +59,40 @@ class ExpenseReportExport implements FromArray, WithHeadings, WithStyles, WithCo
             'subcategory_breakdown' => ['Expense Category', 'Sub Category', 'Total Amount', '% of Total Expense', '% of Revenue'],
             'item_breakdown' => ['Expense Category', 'Expense Item', 'Total Amount', '% of Total Expense', '% of Revenue'],
             'min_avg_max'    => ['Expense Category', 'Expense Item', 'Months', 'Min (Monthly)', 'Avg (Monthly)', 'Max (Monthly)', 'Std Dev', 'Outlier Months'],
+            'period_comparison' => $this->periodComparisonHeadings(),
             default => [],
         };
+    }
+
+    // period_comparison's $data is the full result array (periods + rows),
+    // not a flat row list like the other report types, since it needs a
+    // variable number of period columns (2–5).
+    private function periodComparisonHeadings(): array
+    {
+        $periods = $this->data['periods'] ?? [];
+        $heads   = ['Label'];
+        foreach ($periods as $i => $p) {
+            $heads[] = 'Period ' . ($i + 1) . " ({$p['from']} to {$p['to']})";
+            if ($i > 0) $heads[] = "Change % (vs Period {$i})";
+        }
+        return $heads;
+    }
+
+    private function periodComparisonRows(): array
+    {
+        $rows = [];
+        foreach (($this->data['rows'] ?? []) as $r) {
+            $row = [$r['label']];
+            foreach (($r['values'] ?? []) as $i => $v) {
+                $row[] = $v;
+                if ($i > 0) {
+                    $change = $r['changes'][$i - 1] ?? null;
+                    $row[]  = $change === null ? 'N/A' : $change . '%';
+                }
+            }
+            $rows[] = $row;
+        }
+        return $rows;
     }
 
     public function array(): array
@@ -98,6 +131,8 @@ class ExpenseReportExport implements FromArray, WithHeadings, WithStyles, WithCo
                 $r['std_dev'],
                 $r['outlier_count'],
             ], $this->data),
+
+            'period_comparison' => $this->periodComparisonRows(),
 
             default => [],
         };

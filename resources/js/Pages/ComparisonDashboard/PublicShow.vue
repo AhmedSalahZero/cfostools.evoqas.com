@@ -240,6 +240,16 @@
                 <td class="num val-cell">{{ cat.tail_customers }}</td>
               </tr>
             </tbody>
+            <tfoot>
+              <tr style="border-top:2px solid var(--line); font-weight:700;">
+                <td>Total</td>
+                <td class="num val-cell">{{ pcTotal(pc.categories).total_products }}</td>
+                <td class="num val-cell">{{ pcTotal(pc.categories).core_count }} <span style="color:var(--muted); font-size:11px; font-weight:400;">({{ pcTotal(pc.categories).core_pct }}%)</span></td>
+                <td class="num val-cell" title="A customer buying in multiple categories is counted once per category, so this can exceed the company's total distinct customer count.">{{ pcTotal(pc.categories).core_customers }}</td>
+                <td class="num val-cell">{{ pcTotal(pc.categories).tail_count }} <span style="color:var(--muted); font-size:11px; font-weight:400;">({{ pcTotal(pc.categories).tail_pct }}%)</span></td>
+                <td class="num val-cell" title="A customer buying in multiple categories is counted once per category, so this can exceed the company's total distinct customer count.">{{ pcTotal(pc.categories).tail_customers }}</td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
@@ -313,6 +323,30 @@ const props = defineProps({ companyName: String, dashboard: Object, zoomOut: Arr
 
 function fmt(n) { return Math.round(parseFloat(n) || 0).toLocaleString('en-US') }
 function fmtM(n) { return ((parseFloat(n) || 0) / 1e6).toFixed(1) + 'M' }
+
+// Product Concentration "Total" row — core_pct/tail_pct are recomputed
+// from summed core_value/total_value (not averaged from each category's
+// own %), so the total is weighted by category size rather than treating
+// a 1-product category the same as a 40-product one.
+function pcTotal(categories) {
+  const totalProducts = categories.reduce((s, c) => s + c.total_products, 0)
+  const coreCount     = categories.reduce((s, c) => s + c.core_count, 0)
+  const tailCount     = categories.reduce((s, c) => s + c.tail_count, 0)
+  const coreCustomers = categories.reduce((s, c) => s + c.core_customers, 0)
+  const tailCustomers = categories.reduce((s, c) => s + c.tail_customers, 0)
+  const totalValue    = categories.reduce((s, c) => s + (c.total_value || 0), 0)
+  const coreValue     = categories.reduce((s, c) => s + (c.core_value || 0), 0)
+  const tailValue     = categories.reduce((s, c) => s + (c.tail_value || 0), 0)
+  return {
+    total_products: totalProducts,
+    core_count: coreCount,
+    core_pct: totalValue > 0 ? Math.round((coreValue / totalValue) * 1000) / 10 : 0,
+    core_customers: coreCustomers,
+    tail_count: tailCount,
+    tail_pct: totalValue > 0 ? Math.round((tailValue / totalValue) * 1000) / 10 : 0,
+    tail_customers: tailCustomers,
+  }
+}
 function monthsLabel(days) { return Math.round(days / 30.44) + ' mo' }
 function sectionTag(n) { return String(n).padStart(2, '0') }
 
@@ -389,7 +423,8 @@ function renderLeaderboard(container, columns) {
           const priorCols = columns.slice(0, ci)
           const prevLine = priorCols.map((pc, pj) => {
             const rk = r[`rank_${pj}`]
-            return `${pc.label.slice(0,4)} ${rk != null ? '#'+rk : 'new'}`
+            const periodsBack = ci - pj
+            return `Yr${periodsBack} ${rk != null ? '#'+rk : 'new'}`
           }).join(' · ')
           return `<div class="lb-row">
             <div class="lb-rankcol"><span class="lb-rank">#${i+1}</span>${prevLine ? `<span class="lb-prev">${prevLine}</span>` : ''}</div>

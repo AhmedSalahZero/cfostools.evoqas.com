@@ -9,6 +9,7 @@ class ComparisonDashboard extends Model
 {
     protected $fillable = [
         'portfolio_company_id',
+        'type',
         'name',
         'periods',
         'share_token',

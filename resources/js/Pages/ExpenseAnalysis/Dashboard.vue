@@ -111,6 +111,51 @@
           </div>
         </div>
 
+        <!-- ── SECTION 1.5: RUN-RATE PROJECTION ── -->
+        <div v-if="runRate && runRate.applicable" class="bg-mp-card border border-mp-border rounded-xl p-6">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <p class="text-xs font-semibold text-white uppercase tracking-widest">{{ runRate.year }} Run-Rate Projection</p>
+              <p class="text-mp-muted text-xs mt-1">Based on {{ runRate.months_elapsed }} month{{ runRate.months_elapsed > 1 ? 's' : '' }} of actuals through {{ formatMonth(runRate.as_of) }}</p>
+            </div>
+            <span class="text-xs px-2.5 py-1 rounded-full font-medium"
+              :class="runRate.method === 'seasonal' ? 'bg-mp-teal/20 text-mp-teal' : 'bg-mp-gold/20 text-mp-gold'">
+              {{ runRate.method === 'seasonal' ? '📅 Seasonal method' : '📈 Trend method' }}
+            </span>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div class="bg-mp-card-hover rounded-lg p-4">
+              <p class="text-xs text-mp-muted mb-1">YTD Actual</p>
+              <p class="text-lg font-bold text-mp-text-secondary">{{ fmt(runRate.ytd_actual) }}</p>
+            </div>
+            <div class="bg-mp-card-hover rounded-lg p-4">
+              <p class="text-xs text-mp-muted mb-1">Projected Remainder</p>
+              <p class="text-lg font-bold text-mp-text">{{ fmt(runRate.projected_remainder) }}</p>
+            </div>
+            <div class="bg-mp-card-hover rounded-lg p-4 md:col-span-2">
+              <p class="text-xs text-mp-muted mb-1">Projected Full-Year {{ runRate.year }}</p>
+              <p class="text-xl font-bold text-mp-warning">{{ fmt(runRate.projected_full_year) }}</p>
+            </div>
+          </div>
+
+          <div v-if="runRate.outlier_months_excluded.length" class="text-xs text-mp-muted mb-3">
+            ⚠ Excluded {{ runRate.outlier_months_excluded.map(formatMonth).join(', ') }} from the trailing average — flagged as unusually high/low months (IQR method), so they wouldn't skew the projection.
+          </div>
+
+          <!-- Methodology note, always visible so this is never a black box -->
+          <div class="text-xs text-mp-muted bg-mp-page border border-mp-border rounded-lg p-3 leading-relaxed">
+            <span class="text-mp-text-secondary font-semibold">How this is calculated: </span>
+            <template v-if="runRate.method === 'seasonal'">
+              Because {{ runRate.years_of_history_used }} full prior years ({{ runRate.seasonal_years.join(', ') }}) of expense data are available, this uses the <b>seasonal method</b>: in those prior years, on average {{ runRate.seasonal_pct_elapsed_by_now }}% of the full year's expense had typically occurred by this same point (month/day). Projected Full-Year = YTD Actual ÷ {{ runRate.seasonal_pct_elapsed_by_now }}%. This accounts for spend that's naturally loaded into specific months (e.g. year-end bonuses) rather than assuming a flat pace — for reference, the simpler trend-based estimate alone would give {{ fmt(runRate.trend_method_full_year) }}.
+            </template>
+            <template v-else>
+              With fewer than 2 full prior years of expense data available, this uses the <b>trend method</b>: Projected Full-Year = YTD Actual + (Months Remaining × Trailing 3-Month Average{{ runRate.outlier_months_excluded.length ? ', excluding outlier months' : '' }}). Trailing average used: {{ fmt(runRate.trailing_avg) }}/month across {{ runRate.trailing_months_used.map(formatMonth).join(', ') }}. Once 2 full prior calendar years of data exist, this automatically switches to a seasonal-adjusted method instead.
+            </template>
+            Only shown for a year-to-date range (Jan 1 → today); pick a different date range to hide it.
+          </div>
+        </div>
+
         <!-- ── SECTION 2: MONTHLY TREND LINE CHART (Chart.js — same as Sales Dashboard) ── -->
         <div class="bg-mp-card border border-mp-border rounded-xl p-6">
           <div class="flex items-center justify-between mb-4">
@@ -168,7 +213,7 @@
                 <tr v-for="(cat, i) in categoryBreakdown" :key="cat.category" class="hover:bg-mp-card-hover/50 transition-colors">
                   <td class="px-5 py-2.5 text-mp-text-secondary">
                     <div class="flex items-center gap-2">
-                      <div class="w-3 h-3 rounded-full flex-shrink-0" :style="`background:${PALETTE[i % PALETTE.length]}`"></div>
+                      <div class="w-3 h-3 rounded-full flex-shrink-0" :style="`background:${categoryColors[i]}`"></div>
                       {{ cat.category }}
                     </div>
                   </td>
@@ -376,10 +421,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 import DonutChart3D from '@/Components/DonutChart3D.vue'
+import { generateDistinctColors } from '@/Utils/chartColors'
 import axios from 'axios'
 
 const props = defineProps({
@@ -402,10 +448,12 @@ const editorEl      = ref(null)
 
 const kpis              = ref({ total_expense: 0, total_revenue: 0, expense_to_rev: 0, category_count: 0, item_count: 0, avg_monthly: 0 })
 const categoryBreakdown = ref([])
+const categoryColors    = computed(() => generateDistinctColors(categoryBreakdown.value.length))
 const monthlyTrend      = ref([])
 const topItems          = ref([])
 const statsPerCategory  = ref([])
 const breakdownTab      = ref('chart')
+const runRate           = ref(null)
 
 // ── Canvas refs ──
 const trendChartCanvas = ref(null)
@@ -426,6 +474,15 @@ function compactNum(n) {
   if (n >= 1e6) return (n/1e6).toFixed(1) + 'M'
   if (n >= 1e3) return (n/1e3).toFixed(0) + 'K'
   return n.toFixed(0)
+}
+
+// Handles both "YYYY-MM" (month buckets from run-rate data) and a full
+// "YYYY-MM-DD" date (the as_of date) — same short "Mon YYYY" output either way.
+function formatMonth(value) {
+  if (!value) return ''
+  const [y, m] = value.split('-')
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  return `${months[parseInt(m, 10) - 1]} ${y}`
 }
 
 // ── Load Chart.js from CDN ──
@@ -540,6 +597,7 @@ async function loadData() {
     monthlyTrend.value      = res.data.monthly_trend
     topItems.value          = res.data.top_items
     statsPerCategory.value  = res.data.stats_per_category
+    runRate.value           = res.data.run_rate
 
     loading.value = false
     await nextTick()

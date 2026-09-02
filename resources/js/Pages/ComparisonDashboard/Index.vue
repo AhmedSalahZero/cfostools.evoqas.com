@@ -7,10 +7,16 @@
           <h1 class="text-xl font-bold text-mp-text-secondary">Comparison Dashboards</h1>
           <p class="text-sm text-mp-muted mt-1">Saved period comparisons — always computed live, shareable by link.</p>
         </div>
-        <Link :href="route('comparison-dashboard.create', company.id)"
-          class="bg-mp-teal hover:bg-mp-teal-dark text-mp-text-secondary text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
-          + New Dashboard
-        </Link>
+        <div class="flex items-center gap-2">
+          <Link :href="route('comparison-dashboard.create', company.id) + '?type=sales'"
+            class="bg-mp-teal hover:bg-mp-teal-dark text-mp-text-secondary text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+            + New Sales Dashboard
+          </Link>
+          <Link :href="route('comparison-dashboard.create', company.id) + '?type=expense'"
+            class="bg-mp-gold hover:bg-mp-gold-dark text-mp-text-secondary text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">
+            + New Expense Dashboard
+          </Link>
+        </div>
       </div>
 
       <div v-if="dashboards.length === 0" class="bg-mp-card border border-mp-border rounded-2xl p-10 text-center text-mp-muted text-sm">
@@ -20,7 +26,12 @@
       <div v-else class="space-y-3">
         <div v-for="d in dashboards" :key="d.id" class="bg-mp-card border border-mp-border rounded-xl p-5 flex items-center justify-between hover:border-mp-teal/50 transition-colors">
           <Link :href="route('comparison-dashboard.show', { company: company.id, dashboard: d.id })" class="flex-1">
-            <p class="text-mp-text-secondary font-semibold text-sm">{{ d.name }}</p>
+            <div class="flex items-center gap-2">
+              <span class="text-xs px-2 py-0.5 rounded-full font-medium" :class="d.type === 'expense' ? 'bg-mp-gold/20 text-mp-gold' : 'bg-mp-teal/20 text-mp-teal'">
+                {{ d.type === 'expense' ? 'Expense' : 'Sales' }}
+              </span>
+              <p class="text-mp-text-secondary font-semibold text-sm">{{ d.name }}</p>
+            </div>
             <p class="text-mp-muted text-xs mt-1">{{ d.periods.length }} periods · {{ d.periods.map(p => p.label).join(' · ') }}</p>
           </Link>
           <div class="flex items-center gap-3">
