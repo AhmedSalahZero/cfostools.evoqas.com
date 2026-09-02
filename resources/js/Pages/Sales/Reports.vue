@@ -971,7 +971,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 import DimensionMultiSelect from '@/Components/DimensionMultiSelect.vue'
-import { generateDistinctColors, shadeColor } from '@/utils/chartColors'
+import { generateDistinctColors, shadeColor } from '@/Utils/chartColors'
 import axios from 'axios'
 
 const props = defineProps({

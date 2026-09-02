@@ -17,7 +17,7 @@
  * never a repeated one, even for charts with many categories.
  */
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { generateDistinctColors, shadeColor } from '@/utils/chartColors'
+import { generateDistinctColors, shadeColor } from '@/Utils/chartColors'
 
 const props = defineProps({
   data:        { type: Array, required: true }, // [{ [labelKey]: ..., [valueKey]: ... }]
