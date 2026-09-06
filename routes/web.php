@@ -71,6 +71,7 @@ Route::middleware(['auth', 'role:super-admin|admin'])->group(function () {
 // ── Public Survey Routes (NO auth required) ───────────────────────────────────
 Route::get('/s/{token}',  [App\Http\Controllers\SurveyController::class, 'publicShow'])->name('survey.public');
 Route::post('/s/{token}', [App\Http\Controllers\SurveyController::class, 'publicSubmit'])->name('survey.public.submit');
+Route::post('/s/{token}/draft', [App\Http\Controllers\SurveyController::class, 'publicSaveDraft'])->name('survey.public.draft');
 Route::get('/cd/{token}', [App\Http\Controllers\ComparisonDashboardController::class, 'publicShow'])->name('comparison-dashboard.public');
 
 

@@ -22,6 +22,19 @@
         </p>
       </div>
 
+      <!-- Resumed draft notice -->
+      <div v-if="resumed" class="mb-6 flex items-start gap-3 bg-mp-success/15 border border-mp-success/50 rounded-2xl px-5 py-4">
+        <svg class="w-5 h-5 text-mp-success flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div>
+          <p class="text-mp-success text-sm font-semibold">Welcome back — your answers were restored.</p>
+          <p class="text-white/70 text-xs mt-0.5">
+            {{ answeredCount }} of {{ questions.length }} question{{ questions.length !== 1 ? 's' : '' }} answered so far. Pick up where you left off.
+          </p>
+        </div>
+      </div>
+
       <!-- Respondent info -->
       <div class="bg-mp-card border border-mp-border rounded-2xl p-6 mb-6">
         <p class="text-xs text-white uppercase tracking-widest font-semibold mb-4">About You <span class="text-white normal-case font-normal">(all optional)</span></p>
@@ -74,7 +87,8 @@
             </h3>
           </div>
 
-          <div class="bg-mp-card border border-mp-border rounded-2xl p-6"
+          <div :id="`question-${q.id}`"
+            class="bg-mp-card border border-mp-border rounded-2xl p-6"
             :class="{ 'border-mp-danger/50': errors[q.id] }">
 
             <!-- Question text -->
@@ -207,19 +221,68 @@
         <span v-else>Submit Response →</span>
       </button>
 
+      <!-- Save & continue later -->
+      <button @click="saveDraft" :disabled="savingDraft || submitting" type="button"
+        class="w-full mt-3 bg-mp-card hover:bg-mp-card-hover border border-mp-border disabled:opacity-50 text-white font-medium py-3.5 rounded-2xl text-sm transition-colors flex items-center justify-center gap-2">
+        <svg v-if="savingDraft" class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+        <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-4-4v8m0 0l3-3m-3 3l-3-3" />
+        </svg>
+        {{ savingDraft ? 'Saving…' : 'Save & Continue Later' }}
+      </button>
+
+      <p v-if="draftError" class="text-center text-mp-danger text-xs mt-3">{{ draftError }}</p>
+
       <p class="text-center text-white text-xs mt-4">Your response will be recorded anonymously unless you provided your name above.</p>
     </div>
+
+    <!-- Progress saved -->
+    <div v-if="showSavedModal"
+      class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div class="bg-mp-card border border-mp-border rounded-2xl shadow-2xl w-full max-w-md">
+
+        <div class="p-6 text-center">
+          <div class="w-14 h-14 bg-mp-success/25 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg class="w-7 h-7 text-mp-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h3 class="text-white font-bold text-lg mb-2">Progress saved</h3>
+          <p class="text-white/80 text-sm mb-3">
+            {{ answeredCount }} of {{ questions.length }} question{{ questions.length !== 1 ? 's' : '' }} answered.
+          </p>
+          <p class="text-white/70 text-sm">
+            You can close this page and come back whenever you like — just open
+            <span class="text-white font-medium">the same survey link</span> in this browser
+            and your answers will be waiting.
+          </p>
+        </div>
+
+        <div class="px-6 pb-6">
+          <button @click="showSavedModal = false" type="button"
+            class="w-full px-4 py-2.5 rounded-lg bg-mp-card-hover hover:bg-mp-page text-white text-sm font-medium transition-colors">
+            Keep Answering
+          </button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { Head, router } from '@inertiajs/vue3'
 
 const props = defineProps({
   survey: Object,
   questions: Array,
   sections: { type: Object, default: () => ({}) },
+  draft: { type: Object, default: null },
 })
 
 const nameLocked = !!props.survey.default_respondent_name
@@ -228,16 +291,68 @@ const companyLocked = !!props.survey.default_respondent_company
 const showAge = !!props.survey.show_respondent_age
 const showGender = !!props.survey.show_respondent_gender
 
+const draftRespondent = props.draft?.respondent ?? {}
+
 const respondent = reactive({
-  name: props.survey.default_respondent_name ?? '',
-  title: props.survey.default_respondent_title ?? '',
-  company: props.survey.default_respondent_company ?? '',
-  age: '',
-  gender: null,
+  // A locked default set by the survey owner always wins over the draft
+  name: props.survey.default_respondent_name ?? draftRespondent.name ?? '',
+  title: props.survey.default_respondent_title ?? draftRespondent.title ?? '',
+  company: props.survey.default_respondent_company ?? draftRespondent.company ?? '',
+  age: draftRespondent.age ?? '',
+  gender: draftRespondent.gender ?? null,
 })
-const answers = reactive({})
+const answers = reactive({ ...(props.draft?.answers ?? {}) })
 const errors = reactive({})
 const submitting = ref(false)
+
+// ── Save & continue later ────────────────────────────────────────────────────
+// The draft is tied to this browser by a cookie the server sets, so the
+// respondent reopens the exact same survey link to carry on.
+const savingDraft = ref(false)
+const draftError = ref('')
+const showSavedModal = ref(false)
+const resumed = ref(!!props.draft)
+
+const respondentPayload = () => ({
+  name: respondent.name || null,
+  title: respondent.title || null,
+  company: respondent.company || null,
+  age: respondent.age || null,
+  gender: respondent.gender || null,
+})
+
+const saveDraft = async () => {
+  if (savingDraft.value) return
+
+  savingDraft.value = true
+  draftError.value = ''
+
+  try {
+    await window.axios.post(
+      `/s/${props.survey.link_token}/draft`,
+      { respondent: respondentPayload(), answers },
+      { withXSRFToken: true },
+    )
+    showSavedModal.value = true
+  } catch (error) {
+    draftError.value = error?.response?.data?.message || 'Could not save your progress. Please try again.'
+  } finally {
+    savingDraft.value = false
+  }
+}
+
+// Long surveys: jumping to the very top hides which question actually failed
+const scrollToFirstError = () => {
+  const firstInvalid = props.questions.find(q => errors[q.id])
+  const el = firstInvalid ? document.getElementById(`question-${firstInvalid.id}`) : null
+
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  else window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const answeredCount = computed(
+  () => props.questions.filter(q => isAnswered(q)).length
+)
 
 const inputClass = (readonly) =>
   [
@@ -314,7 +429,7 @@ const submitSurvey = async () => {
     }
   })
   if (!valid) {
-    window.scrollTo({ top: 0, behavior: 'smooth' })
+    scrollToFirstError()
     return
   }
 
@@ -326,6 +441,8 @@ const submitSurvey = async () => {
     respondent_gender:  respondent.gender || null,
     respondent_age:     respondent.age || null,
     answers,
-  }, { onFinish: () => { submitting.value = false } })
+  }, {
+    onFinish: () => { submitting.value = false },
+  })
 }
 </script>

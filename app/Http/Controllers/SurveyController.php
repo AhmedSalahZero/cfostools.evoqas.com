@@ -6,6 +6,7 @@ use App\Exports\SurveyResponsesExport;
 use App\Models\PortfolioCompany;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -14,6 +15,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class SurveyController extends Controller
 {
+    /** How long a saved-but-unsubmitted survey draft stays resumable (60 days). */
+    private const DRAFT_COOKIE_MINUTES = 60 * 24 * 60;
+
     // ─────────────────────────────────────────────────────────────────────────
     // INDEX — List all surveys for a company
     // ─────────────────────────────────────────────────────────────────────────
@@ -378,7 +382,90 @@ class SurveyController extends Controller
             'survey'    => $survey,
             'questions' => $questions,
             'sections'  => $sections,
+            'draft'     => $this->loadDraft($survey->id, request()->cookie($this->draftCookieName((int) $survey->id))),
         ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PUBLIC SAVE DRAFT — "Save & continue later"
+    // ─────────────────────────────────────────────────────────────────────────
+    public function publicSaveDraft(Request $request, $token)
+    {
+        $survey = DB::table('surveys')->where('link_token', $token)
+            ->where('status', 'active')->firstOrFail();
+
+        $request->validate([
+            'answers'    => ['nullable', 'array'],
+            'respondent' => ['nullable', 'array'],
+        ]);
+
+        $payload = [
+            'respondent' => json_encode((object) ($request->input('respondent') ?: [])),
+            'answers'    => json_encode((object) ($request->input('answers') ?: [])),
+            'ip_address' => $request->ip(),
+            'updated_at' => now(),
+        ];
+
+        // Reuse the draft this browser already owns, so saving repeatedly keeps
+        // adding to the same draft instead of piling up new ones.
+        $cookieName = $this->draftCookieName((int) $survey->id);
+        $existing   = $this->findDraft($survey->id, $request->cookie($cookieName));
+
+        if ($existing) {
+            DB::table('survey_drafts')->where('id', $existing->id)->update($payload);
+            $draftToken = $existing->token;
+        } else {
+            $draftToken = Str::random(64);
+            DB::table('survey_drafts')->insert($payload + [
+                'survey_id'  => $survey->id,
+                'token'      => $draftToken,
+                'created_at' => now(),
+            ]);
+        }
+
+        // The respondent reopens the very same survey link — this cookie is what
+        // tells us which draft is theirs, so no separate resume link is needed.
+        Cookie::queue($cookieName, $draftToken, self::DRAFT_COOKIE_MINUTES);
+
+        return response()->json([
+            'saved_at'   => now()->toIso8601String(),
+            'expires_in' => self::DRAFT_COOKIE_MINUTES,
+        ]);
+    }
+
+    /** Cookie holding this browser's draft token for one survey. */
+    private function draftCookieName(int $surveyId): string
+    {
+        return 'survey_draft_' . $surveyId;
+    }
+
+    /** A saved draft shaped for the public form, or null when the token is unknown. */
+    private function loadDraft(int $surveyId, ?string $draftToken): ?array
+    {
+        $draft = $this->findDraft($surveyId, $draftToken);
+
+        if (!$draft) {
+            return null;
+        }
+
+        return [
+            'token'      => $draft->token,
+            'respondent' => (object) (json_decode($draft->respondent ?? '{}', true) ?: []),
+            'answers'    => (object) (json_decode($draft->answers ?? '{}', true) ?: []),
+            'saved_at'   => $draft->updated_at,
+        ];
+    }
+
+    private function findDraft(int $surveyId, ?string $draftToken): ?object
+    {
+        if (!$draftToken) {
+            return null;
+        }
+
+        return DB::table('survey_drafts')
+            ->where('survey_id', $surveyId)
+            ->where('token', $draftToken)
+            ->first();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -435,6 +522,13 @@ class SurveyController extends Controller
                 ]);
             }
         }
+
+        // The response is recorded — the half-finished draft is no longer needed
+        $cookieName = $this->draftCookieName((int) $survey->id);
+        if ($draft = $this->findDraft((int) $survey->id, $request->cookie($cookieName))) {
+            DB::table('survey_drafts')->where('id', $draft->id)->delete();
+        }
+        Cookie::queue(Cookie::forget($cookieName));
 
         // Update cached response count
         DB::table('surveys')->where('id', $survey->id)
