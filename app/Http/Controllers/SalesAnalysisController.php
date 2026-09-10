@@ -397,21 +397,26 @@ class SalesAnalysisController extends Controller
             'dim2_items'    => ['nullable'],  // array of Factor 2 item names OR a JSON string
             'invoice_view'      => ['nullable', 'in:by_dimension,snapshot,large_invoices'],
             'invoice_threshold' => ['nullable', 'numeric', 'min:0'],
+            'breakdown_dimension' => ['nullable', 'string'],
+            'breakdown_metric'    => ['nullable', 'in:net_sales_value,quantity'],
+            'focus_item'          => ['nullable', 'string'],
         ]);
 
         $query = SalesData::where('portfolio_company_id', $companyId)
             ->whereBetween('date', [$request->date_from, $request->date_to]);
 
         $result = match($request->report_type) {
-            'single_dimension'  => $this->runSingleDimension($query, $request),
-            'matrix'            => $this->runMatrix($query, $request),
-            'ranking'           => $this->runRanking($query, $request),
-            'customer_nature'   => $this->runCustomerNature($companyId, $request),
-            'period_comparison' => $this->runPeriodComparison($companyId, $request),
-            'trend'             => $this->runTrend($query, $request),
-            'two_factors_trend' => $this->runTwoFactorsTrend($query, $request),
-            'invoice_analysis'  => $this->runInvoiceAnalysis($companyId, $request),
-            default             => ['error' => 'Unknown report type'],
+            'single_dimension'    => $this->runSingleDimension($query, $request),
+            'matrix'              => $this->runMatrix($query, $request),
+            'ranking'             => $this->runRanking($query, $request),
+            'customer_nature'     => $this->runCustomerNature($companyId, $request),
+            'period_comparison'   => $this->runPeriodComparison($companyId, $request),
+            'trend'               => $this->runTrend($query, $request),
+            'two_factors_trend'   => $this->runTwoFactorsTrend($query, $request),
+            'invoice_analysis'    => $this->runInvoiceAnalysis($companyId, $request),
+            'discount_dependency' => $this->runDiscountDependency($query, $request),
+            'basket_affinity'     => $this->runBasketAffinity($companyId, $request),
+            default               => ['error' => 'Unknown report type'],
          } ;
 
         return response()->json($result);
@@ -437,6 +442,9 @@ class SalesAnalysisController extends Controller
             'dim2_items'    => ['nullable'],
             'invoice_view'      => ['nullable', 'in:by_dimension,snapshot,large_invoices'],
             'invoice_threshold' => ['nullable', 'numeric', 'min:0'],
+            'breakdown_dimension' => ['nullable', 'string'],
+            'breakdown_metric'    => ['nullable', 'in:net_sales_value,quantity'],
+            'focus_item'          => ['nullable', 'string'],
         ]);
 
         try {
@@ -446,15 +454,17 @@ class SalesAnalysisController extends Controller
             ->whereBetween('date', [$request->date_from, $request->date_to]);
 
         $result = match($request->report_type) {
-            'single_dimension'  => $this->runSingleDimension($query, $request),
-            'matrix'            => $this->runMatrix($query, $request),
-            'ranking'           => $this->runRanking($query, $request),
-            'customer_nature'   => $this->runCustomerNature($companyId, $request),
-            'period_comparison' => $this->runPeriodComparison($companyId, $request),
-            'trend'             => $this->runTrend($query, $request),
-            'two_factors_trend' => $this->runTwoFactorsTrend($query, $request),
-            'invoice_analysis'  => $this->runInvoiceAnalysis($companyId, $request),
-            default             => [],
+            'single_dimension'    => $this->runSingleDimension($query, $request),
+            'matrix'              => $this->runMatrix($query, $request),
+            'ranking'             => $this->runRanking($query, $request),
+            'customer_nature'     => $this->runCustomerNature($companyId, $request),
+            'period_comparison'   => $this->runPeriodComparison($companyId, $request),
+            'trend'               => $this->runTrend($query, $request),
+            'two_factors_trend'   => $this->runTwoFactorsTrend($query, $request),
+            'invoice_analysis'    => $this->runInvoiceAnalysis($companyId, $request),
+            'discount_dependency' => $this->runDiscountDependency($query, $request),
+            'basket_affinity'     => $this->runBasketAffinity($companyId, $request),
+            default               => [],
         };
 
         $spreadsheet = new Spreadsheet();
@@ -649,6 +659,27 @@ class SalesAnalysisController extends Controller
             $spreadsheet->setActiveSheetIndex(0);
             foreach (['A','B','C'] as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
 
+            // Breakdown matrix sheet, if the user picked one
+            if (!empty($result['breakdown_dimension']) && !empty($result['columns'])) {
+                $bdDimLabel = self::FIELDS[$result['breakdown_dimension']] ?? $result['breakdown_dimension'];
+                $bdMetricLabel = $result['breakdown_metric'] === 'quantity' ? 'Quantity' : 'Net Sales Value';
+                $bdSheet = $spreadsheet->createSheet();
+                $bdSheet->setTitle('Breakdown');
+                $bdHeaders = array_merge(['Customer Nature'], $result['columns']);
+                $bdSheet->fromArray($bdHeaders, null, 'A1');
+                $bdSheet->getStyle('A1:' . \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(count($bdHeaders)) . '1')->applyFromArray($headerStyle);
+                $bdSheet->setCellValue('A' . (count($result['categories']) + 3), "Breakdown by: $bdDimLabel ($bdMetricLabel)");
+                foreach ($result['categories'] as $i => $cat) {
+                    $r = $i + 2;
+                    $rowData = [$catLabels[$cat['label']] ?? $cat['label']];
+                    foreach ($result['columns'] as $col) $rowData[] = $cat[$col] ?? 0;
+                    $bdSheet->fromArray($rowData, null, "A$r");
+                }
+                foreach (range(1, count($bdHeaders)) as $ci) {
+                    $bdSheet->getColumnDimensionByColumn($ci)->setAutoSize(true);
+                }
+            }
+
         } elseif ($result['type'] === 'two_factors_trend') {
             $dim1Label = self::FIELDS[$result['dim1']] ?? $result['dim1'];
             $dim2Label = self::FIELDS[$result['dim2']] ?? $result['dim2'];
@@ -798,6 +829,38 @@ class SalesAnalysisController extends Controller
             $sheet->getStyle("A$row:F$row")->applyFromArray($totalStyle);
             $row++;
             foreach (['A','B','C','D','E','F'] as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
+
+        } elseif ($result['type'] === 'discount_dependency') {
+            $dimLabel = self::FIELDS[$result['dimension']] ?? $result['dimension'];
+            $sheet->fromArray([$dimLabel, 'Gross Sales', 'Total Discount', 'Discount %', 'Net Sales', 'Transactions'], null, "A$row");
+            $sheet->getStyle("A$row:F$row")->applyFromArray($headerStyle);
+            $row++;
+            $totals = ['gross' => 0, 'total_discount' => 0, 'net' => 0, 'transactions' => 0];
+            foreach ($result['rows'] as $i => $r) {
+                $sheet->fromArray([$r['label'], $r['gross'], $r['total_discount'], $r['discount_pct'] . '%', $r['net'], $r['transactions']], null, "A$row");
+                $sheet->getStyle("B$row:C$row")->getNumberFormat()->setFormatCode($numberFormat);
+                $sheet->getStyle("E$row")->getNumberFormat()->setFormatCode($numberFormat);
+                if ($i % 2 === 1) $sheet->getStyle("A$row:F$row")->applyFromArray($altStyle);
+                foreach (['gross', 'total_discount', 'net', 'transactions'] as $k) $totals[$k] += $r[$k];
+                $row++;
+            }
+            $blendedPct = $totals['gross'] > 0 ? round($totals['total_discount'] / $totals['gross'] * 100, 2) : 0;
+            $sheet->fromArray(['Total', $totals['gross'], $totals['total_discount'], $blendedPct . '%', $totals['net'], $totals['transactions']], null, "A$row");
+            $sheet->getStyle("A$row:F$row")->applyFromArray($totalStyle);
+            foreach (['A','B','C','D','E','F'] as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
+
+        } elseif ($result['type'] === 'basket_affinity') {
+            $sheet->setCellValue('A2', 'Focus product: ' . ($result['focus_item'] ?? '—') . '  |  Period: ' . $request->date_from . ' to ' . $request->date_to . '  |  ' . ($result['focus_invoice_count'] ?? 0) . ' invoices contained it');
+            $sheet->fromArray(['Co-Purchased Product', 'Invoices Together', 'Affinity %', 'Co-Product Net Sales', "% of Co-Product's Total Sales", 'Co-Product Net Quantity', "% of Co-Product's Total Quantity"], null, "A$row");
+            $sheet->getStyle("A$row:G$row")->applyFromArray($headerStyle);
+            $row++;
+            foreach ($result['rows'] as $i => $r) {
+                $sheet->fromArray([$r['label'], $r['co_invoices'], $r['affinity_pct'] . '%', $r['co_sales'], $r['co_sales_pct'] . '%', $r['co_quantity'], $r['co_quantity_pct'] . '%'], null, "A$row");
+                $sheet->getStyle("D$row")->getNumberFormat()->setFormatCode($numberFormat);
+                if ($i % 2 === 1) $sheet->getStyle("A$row:G$row")->applyFromArray($altStyle);
+                $row++;
+            }
+            foreach (['A','B','C','D','E','F','G'] as $col) $sheet->getColumnDimension($col)->setAutoSize(true);
         }
 
         // ── Sheet title ──
@@ -1103,16 +1166,228 @@ class SalesAnalysisController extends Controller
             ];
         });
 
+        // ── Optional breakdown: cross-tabulate each Customer Nature bucket
+        //    against another dimension (Product, Branch, Sales Channel,
+        //    Business Sector, Sales Rep), by Value or Quantity. This is
+        //    what turns "12 Repeating customers" into "12 Repeating
+        //    customers, and here's what they're actually buying."
+        $breakdownDim    = $request->breakdown_dimension ?: null;
+        $breakdownMetric = $request->breakdown_metric === 'quantity' ? 'quantity' : 'net_sales_value';
+        $columns         = [];
+
+        if ($breakdownDim) {
+            $metricSql = $breakdownMetric === 'quantity' ? 'SUM(`quantity`)' : 'SUM(`net_sales_value`)';
+
+            // Raw per-bucket, per-dimension-value totals, before deciding on
+            // a shared column set.
+            $rawBreakdowns = $categories->map(function ($cat) use ($companyId, $breakdownDim, $metricSql, $pastPeriodYear, $request) {
+                $names = collect($cat['customers'])->pluck('name');
+                if ($names->isEmpty()) {
+                    return collect();
+                }
+
+                $q = SalesData::where('portfolio_company_id', $companyId)
+                    ->whereIn('customer_name', $names)
+                    ->whereNotNull($breakdownDim)->where($breakdownDim, '!=', '');
+
+                if ($cat['is_past_period']) {
+                    $q->whereYear('date', $pastPeriodYear[$cat['label']]);
+                } else {
+                    $q->whereBetween('date', [$request->date_from, $request->date_to]);
+                }
+
+                return $q->selectRaw("`$breakdownDim` as label, $metricSql as value")
+                    ->groupBy($breakdownDim)
+                    ->pluck('value', 'label');
+            });
+
+            // Shared column set: top 15 dimension values by combined total
+            // across every bucket, with the remainder folded into "Others"
+            // so the matrix stays readable regardless of how many
+            // products/branches/etc. actually exist.
+            $combinedTotals = [];
+            foreach ($rawBreakdowns as $bd) {
+                foreach ($bd as $label => $value) {
+                    $combinedTotals[$label] = ($combinedTotals[$label] ?? 0) + (float) $value;
+                }
+            }
+            arsort($combinedTotals);
+            $topLabels = array_slice(array_keys($combinedTotals), 0, 15);
+            $hasOthers = count($combinedTotals) > count($topLabels);
+            $columns   = $hasOthers ? array_merge($topLabels, ['Others']) : $topLabels;
+
+            $categories = $categories->map(function ($cat) use ($rawBreakdowns, $topLabels, $hasOthers) {
+                $bd  = $rawBreakdowns[$cat['label']] ?? collect();
+                $row = $cat;
+                foreach ($topLabels as $label) {
+                    $row[$label] = round((float) ($bd[$label] ?? 0), 2);
+                }
+                if ($hasOthers) {
+                    $row['Others'] = round((float) $bd->except($topLabels)->sum(), 2);
+                }
+                return $row;
+            });
+        }
+
         return [
-            'type'        => 'customer_nature',
-            'year'        => $currentYear,
-            'grand_total' => (float) $grandTotal,
-            'metric'      => $metric,
-            'categories'  => $categories,
+            'type'                => 'customer_nature',
+            'year'                => $currentYear,
+            'grand_total'         => (float) $grandTotal,
+            'metric'              => $metric,
+            'categories'          => $categories,
+            'breakdown_dimension' => $breakdownDim,
+            'breakdown_metric'    => $breakdownMetric,
+            'columns'             => $columns,
         ];
     }
 
-    // ── Period Comparison ──────────────────────────────────────
+    // ── Discount Dependency ─────────────────────────────────────
+    // What share of a dimension's revenue relies on a discount to close.
+    // A product/branch/channel that only moves when discounted is a real
+    // demand-quality signal — organic pull vs. promotion dependency.
+
+    private function runDiscountDependency($query, $request)
+    {
+        $dimension = $request->dimension1 ?? 'product_item';
+        $limit     = (int) ($request->top_n ?? 500);
+
+        $selected = $this->decodeSelectedItems($request->selected_items ?? null);
+
+        $q = $query->whereNotNull($dimension)->where($dimension, '!=', '');
+        if (!empty($selected)) {
+            $q->whereIn($dimension, $selected);
+        }
+
+        $rows = $q->selectRaw("
+                `$dimension` as label,
+                SUM(`sales_value`) as gross,
+                SUM(`cash_discount`) as cash_discount,
+                SUM(`quantity_discount`) as quantity_discount,
+                SUM(`special_discount`) as special_discount,
+                SUM(`other_discounts`) as other_discounts,
+                SUM(`net_sales_value`) as net,
+                COUNT(*) as transactions
+            ")
+            ->groupBy($dimension)
+            ->havingRaw('SUM(`sales_value`) > 0')
+            ->get()
+            ->map(function ($r) {
+                $totalDiscount = (float) $r->cash_discount + (float) $r->quantity_discount
+                    + (float) $r->special_discount + (float) $r->other_discounts;
+                $gross = (float) $r->gross;
+                return [
+                    'label'          => $r->label,
+                    'gross'          => $gross,
+                    'total_discount' => round($totalDiscount, 2),
+                    'discount_pct'   => $gross > 0 ? round($totalDiscount / $gross * 100, 2) : 0,
+                    'net'            => (float) $r->net,
+                    'transactions'   => (int) $r->transactions,
+                ];
+            })
+            ->sortByDesc('gross')
+            ->values();
+
+        $result = (empty($selected) && $rows->count() > $limit) ? $rows->take($limit)->values() : $rows;
+
+        return ['type' => 'discount_dependency', 'dimension' => $dimension, 'rows' => $result];
+    }
+
+    // ── Basket Affinity ─────────────────────────────────────────
+    // Given one focus product, which other products commonly appear on
+    // the same invoice — a cross-sell / bundling signal that nothing else
+    // in the report engine surfaces (needs invoice-level grouping, not
+    // a dimension pivot).
+
+    private function runBasketAffinity($companyId, $request)
+    {
+        $dateFrom = $request->date_from;
+        $dateTo   = $request->date_to;
+        $limit    = (int) ($request->top_n ?? 30);
+
+        $focusItem = $request->focus_item ?: null;
+
+        $base = SalesData::where('portfolio_company_id', $companyId)
+            ->whereBetween('date', [$dateFrom, $dateTo])
+            ->whereNotNull('document_number')->where('document_number', '!=', '')
+            ->whereNotNull('product_item')->where('product_item', '!=', '');
+
+        // No focus item chosen — default to the top-selling product in range.
+        if (!$focusItem) {
+            $top = (clone $base)
+                ->selectRaw('product_item as label, SUM(net_sales_value) as value')
+                ->groupBy('product_item')->orderByDesc('value')->first();
+            if (!$top) {
+                return ['type' => 'basket_affinity', 'focus_item' => null, 'focus_invoice_count' => 0, 'rows' => []];
+            }
+            $focusItem = $top->label;
+        }
+
+        $focusInvoiceCount = (clone $base)
+            ->where('product_item', $focusItem)
+            ->distinct('document_number')
+            ->count('document_number');
+
+        if ($focusInvoiceCount === 0) {
+            return ['type' => 'basket_affinity', 'focus_item' => $focusItem, 'focus_invoice_count' => 0, 'rows' => []];
+        }
+
+        // Subquery (not a pulled-into-PHP IN-list) so this stays cheap even
+        // when the focus product appears on thousands of invoices.
+        $coRows = (clone $base)
+            ->where('product_item', '!=', $focusItem)
+            ->whereIn('document_number', function ($sub) use ($companyId, $dateFrom, $dateTo, $focusItem) {
+                $sub->select('document_number')
+                    ->from('sales_data')
+                    ->where('portfolio_company_id', $companyId)
+                    ->whereBetween('date', [$dateFrom, $dateTo])
+                    ->where('product_item', $focusItem);
+            })
+            ->selectRaw('
+                product_item as label,
+                COUNT(DISTINCT document_number) as co_invoices,
+                SUM(net_sales_value) as co_sales,
+                SUM(quantity) as co_quantity
+            ')
+            ->groupBy('product_item')
+            ->orderByDesc('co_sales')
+            ->limit($limit)
+            ->get();
+
+        // Each co-product's OWN total sales/quantity across every one of its
+        // invoices in the period (not just the ones shared with the focus
+        // product) — this is the denominator for "% of its total".
+        $coLabels = $coRows->pluck('label');
+        $ownTotals = (clone $base)
+            ->whereIn('product_item', $coLabels)
+            ->selectRaw('product_item as label, SUM(net_sales_value) as total_sales, SUM(quantity) as total_quantity')
+            ->groupBy('product_item')
+            ->get()
+            ->keyBy('label');
+
+        $rows = $coRows->map(function ($r) use ($focusInvoiceCount, $ownTotals) {
+            $own          = $ownTotals[$r->label] ?? null;
+            $ownSales     = (float) ($own->total_sales ?? 0);
+            $ownQuantity  = (float) ($own->total_quantity ?? 0);
+            $coSales      = (float) $r->co_sales;
+            $coQuantity   = (float) $r->co_quantity;
+            return [
+                'label'            => $r->label,
+                'co_invoices'      => (int) $r->co_invoices,
+                'affinity_pct'     => round($r->co_invoices / $focusInvoiceCount * 100, 1),
+                'co_sales'         => $coSales,
+                'co_sales_pct'     => $ownSales > 0 ? round($coSales / $ownSales * 100, 1) : 0,
+                'co_quantity'      => $coQuantity,
+                'co_quantity_pct'  => $ownQuantity > 0 ? round($coQuantity / $ownQuantity * 100, 1) : 0,
+            ];
+        });
+
+        return [
+            'type'                => 'basket_affinity',
+            'focus_item'          => $focusItem,
+            'focus_invoice_count' => $focusInvoiceCount,
+            'rows'                => $rows,
+        ];
+    }
 
     private function runPeriodComparison($companyId, $request)
     {
@@ -1672,14 +1947,16 @@ class SalesAnalysisController extends Controller
     private function getReportTypes(): array
     {
         return [
-            ['key' => 'single_dimension',  'label' => 'Single Dimension',   'description' => 'Revenue by one dimension e.g. Branch, Zone'],
-            ['key' => 'matrix',            'label' => 'Matrix (2D)',         'description' => 'Two dimensions cross-tabulated e.g. Zone × Product'],
-            ['key' => 'ranking',           'label' => 'Branch Product Rank', 'description' => 'Ranks branches per product with drill-down popup'],
-            ['key' => 'customer_nature',   'label' => 'Customer Nature',     'description' => 'New, Repeating, Active, Stop, Dead, Reactivated'],
-            ['key' => 'period_comparison', 'label' => 'Period Comparison',   'description' => 'Compare two date ranges side by side with % change'],
-            ['key' => 'trend',             'label' => 'Trend Over Time',     'description' => 'Monthly, Q1-Q4 or H1-H2 revenue trend'],
-            ['key' => 'two_factors_trend', 'label' => 'Two Factors Trend',   'description' => 'e.g. Branch vs Product trend with GR% per period'],
-            ['key' => 'invoice_analysis',  'label' => 'Invoice Analysis',    'description' => 'Average invoice value, line items per invoice, and large-invoice detection'],
+            ['key' => 'single_dimension',    'label' => 'Single Dimension',      'description' => 'Revenue by one dimension e.g. Branch, Zone'],
+            ['key' => 'matrix',              'label' => 'Matrix (2D)',            'description' => 'Two dimensions cross-tabulated e.g. Zone × Product'],
+            ['key' => 'ranking',             'label' => 'Branch Product Rank',    'description' => 'Ranks branches per product with drill-down popup'],
+            ['key' => 'customer_nature',     'label' => 'Customer Nature',        'description' => 'New, Repeating, Active, Stop, Dead, Reactivated — optionally broken down by Product, Branch, Channel, Sector or Sales Rep'],
+            ['key' => 'period_comparison',   'label' => 'Period Comparison',      'description' => 'Compare two date ranges side by side with % change'],
+            ['key' => 'trend',               'label' => 'Trend Over Time',        'description' => 'Monthly, Q1-Q4 or H1-H2 revenue trend'],
+            ['key' => 'two_factors_trend',   'label' => 'Two Factors Trend',      'description' => 'e.g. Branch vs Product trend with GR% per period'],
+            ['key' => 'invoice_analysis',    'label' => 'Invoice Analysis',       'description' => 'Average invoice value, line items per invoice, and large-invoice detection'],
+            ['key' => 'discount_dependency', 'label' => 'Discount Dependency',    'description' => 'What share of revenue relies on a discount to close — flags products/branches selling mainly on promotion'],
+            ['key' => 'basket_affinity',     'label' => 'Basket Affinity',        'description' => 'Which other products are commonly bought on the same invoice as a chosen product'],
         ];
     }
 }

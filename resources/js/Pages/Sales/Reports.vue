@@ -105,13 +105,59 @@
                   <option value="annually">Annually</option>
                 </select>
               </div>
-              <div>
+              <div v-if="showMetric">
                 <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Metric</label>
                 <select v-model="params.metric"
                   class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-teal">
                   <option v-for="(label, key) in metricFields" :key="key" :value="key">{{ label }}</option>
                 </select>
               </div>
+            </div>
+
+            <!-- Customer Nature: breakdown dimension + value/quantity toggle -->
+            <div v-if="params.report_type === 'customer_nature'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">
+                  Breakdown by (optional)
+                </label>
+                <select v-model="params.breakdown_dimension"
+                  class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-mp-text-secondary text-sm focus:outline-none focus:ring-2 focus:ring-mp-teal">
+                  <option value="">None — just the four/six nature buckets</option>
+                  <option v-for="key in customerNatureBreakdownDims" :key="key" :value="key">{{ dimensionFields[key] }}</option>
+                </select>
+              </div>
+              <div v-if="params.breakdown_dimension">
+                <label class="block text-xs font-semibold text-white uppercase tracking-widest mb-2">Breakdown Metric</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <button type="button" @click="params.breakdown_metric = 'net_sales_value'"
+                    :class="params.breakdown_metric === 'net_sales_value'
+                      ? 'border-mp-teal bg-mp-teal/20 text-mp-text-secondary'
+                      : 'border-mp-border bg-mp-card-hover text-mp-muted'"
+                    class="p-2.5 rounded-lg border-2 transition-all cursor-pointer text-center text-xs font-semibold">
+                    Value
+                  </button>
+                  <button type="button" @click="params.breakdown_metric = 'quantity'"
+                    :class="params.breakdown_metric === 'quantity'
+                      ? 'border-mp-teal bg-mp-teal/20 text-mp-text-secondary'
+                      : 'border-mp-border bg-mp-card-hover text-mp-muted'"
+                    class="p-2.5 rounded-lg border-2 transition-all cursor-pointer text-center text-xs font-semibold">
+                    Quantity
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Basket Affinity: pick the one focus product -->
+            <div v-if="params.report_type === 'basket_affinity'">
+              <p class="text-xs text-mp-muted mb-2">Ranked by Net Sales Value, regardless of any Metric chosen elsewhere.</p>
+              <DimensionSingleSelect
+                :company-id="company.id"
+                dimension="product_item"
+                :date-from="params.date_from"
+                :date-to="params.date_to"
+                metric="net_sales_value"
+                v-model="params.focus_item"
+                label="Focus product" />
             </div>
 
             <!-- Dimension selectors (context-sensitive) -->
@@ -435,6 +481,100 @@
             </table>
           </div>
 
+          <!-- Discount Dependency -->
+          <div v-else-if="result.type === 'discount_dependency'" class="overflow-x-auto">
+            <div class="px-6 pt-5 pb-1 text-xs text-mp-muted">
+              Higher Discount % signals revenue that leans on promotions to close — worth a pricing/positioning look.
+            </div>
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="border-b border-mp-border">
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">#</th>
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">{{ fields[result.dimension] || result.dimension }}</th>
+                  <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Gross Sales</th>
+                  <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Total Discount</th>
+                  <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Discount %</th>
+                  <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Net Sales</th>
+                  <th class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Transactions</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-800">
+                <tr v-for="(row, i) in result.rows" :key="i" class="hover:bg-mp-card-hover/50 transition-colors">
+                  <td class="px-6 py-3 text-mp-muted text-xs">{{ i + 1 }}</td>
+                  <td class="px-6 py-3 text-mp-text-secondary font-medium">{{ row.label }}</td>
+                  <td class="px-6 py-3 text-right text-mp-text">{{ fmt(row.gross) }}</td>
+                  <td class="px-6 py-3 text-right text-mp-warning">{{ fmt(row.total_discount) }}</td>
+                  <td class="px-6 py-3 text-right">
+                    <span class="font-semibold px-2 py-0.5 rounded-full text-xs"
+                      :class="row.discount_pct >= 30 ? 'bg-mp-danger/20 text-mp-danger' : (row.discount_pct >= 15 ? 'bg-mp-warning/20 text-mp-warning' : 'bg-mp-success/20 text-mp-success')">
+                      {{ row.discount_pct }}%
+                    </span>
+                  </td>
+                  <td class="px-6 py-3 text-right text-mp-success font-semibold">{{ fmt(row.net) }}</td>
+                  <td class="px-6 py-3 text-right text-mp-muted">{{ row.transactions }}</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr class="border-t-2 border-mp-border bg-mp-card-hover/50">
+                  <td colspan="2" class="px-6 py-3 text-mp-text-secondary font-bold">Total</td>
+                  <td class="px-6 py-3 text-right text-mp-text-secondary font-bold">{{ fmt(result.rows.reduce((s,r) => s + r.gross, 0)) }}</td>
+                  <td class="px-6 py-3 text-right text-mp-text-secondary font-bold">{{ fmt(result.rows.reduce((s,r) => s + r.total_discount, 0)) }}</td>
+                  <td class="px-6 py-3 text-right text-mp-text-secondary font-bold">
+                    {{ blendedDiscountPct(result.rows) }}%
+                  </td>
+                  <td class="px-6 py-3 text-right text-mp-text-secondary font-bold">{{ fmt(result.rows.reduce((s,r) => s + r.net, 0)) }}</td>
+                  <td class="px-6 py-3 text-right text-mp-text-secondary font-bold">{{ result.rows.reduce((s,r) => s + r.transactions, 0) }}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <!-- Basket Affinity -->
+          <div v-else-if="result.type === 'basket_affinity'" class="overflow-x-auto">
+            <div class="px-6 pt-5 pb-3">
+              <p class="text-mp-text-secondary text-sm">
+                Focus product: <span class="font-semibold">{{ result.focus_item || '—' }}</span>
+                <span class="text-mp-muted"> — appeared on {{ result.focus_invoice_count }} invoice(s) in this period</span>
+              </p>
+            </div>
+            <table class="w-full text-sm" v-if="result.rows.length">
+              <thead>
+                <tr class="border-b border-mp-border">
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">#</th>
+                  <th class="text-left text-xs font-semibold text-white uppercase tracking-widest px-6 py-3">Co-Purchased Product</th>
+                  <th v-for="col in basketColumns" :key="col.key"
+                    @click="setBasketSort(col.key)"
+                    class="text-right text-xs font-semibold text-white uppercase tracking-widest px-6 py-3 cursor-pointer select-none hover:text-mp-teal transition-colors">
+                    {{ col.label }}
+                    <span class="inline-block w-3 ml-0.5">
+                      <template v-if="basketSort.key === col.key">{{ basketSort.dir === 'desc' ? '▼' : '▲' }}</template>
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-800">
+                <tr v-for="(row, i) in sortedBasketRows" :key="i" class="hover:bg-mp-card-hover/50 transition-colors">
+                  <td class="px-6 py-3 text-mp-muted text-xs">{{ i + 1 }}</td>
+                  <td class="px-6 py-3 text-mp-text-secondary font-medium">{{ row.label }}</td>
+                  <td class="px-6 py-3 text-right text-mp-text">{{ row.co_invoices }}</td>
+                  <td class="px-6 py-3 text-right">
+                    <div class="flex items-center justify-end gap-2">
+                      <div class="w-16 h-1.5 bg-mp-card-hover rounded-full overflow-hidden">
+                        <div class="h-full bg-mp-teal rounded-full" :style="`width:${row.affinity_pct}%`"></div>
+                      </div>
+                      <span class="text-mp-teal text-xs font-semibold w-12 text-right">{{ row.affinity_pct }}%</span>
+                    </div>
+                  </td>
+                  <td class="px-6 py-3 text-right text-mp-success font-semibold">{{ fmt(row.co_sales) }}</td>
+                  <td class="px-6 py-3 text-right text-mp-muted">{{ row.co_sales_pct }}%</td>
+                  <td class="px-6 py-3 text-right text-mp-muted">{{ fmt(row.co_quantity) }}</td>
+                  <td class="px-6 py-3 text-right text-mp-muted">{{ row.co_quantity_pct }}%</td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-else class="px-6 pb-6 text-mp-muted text-sm">No other products were found on the same invoices as this one in the selected period.</p>
+          </div>
+
           <!-- Customer Nature -->
           <div v-else-if="result.type === 'customer_nature'">
             <div class="p-6">
@@ -457,6 +597,33 @@
                 <span class="text-mp-text-secondary font-bold text-sm">Total</span>
                 <span class="text-mp-text-secondary font-bold text-sm">{{ fmt(result.grand_total) }}</span>
               </div>
+            </div>
+
+            <!-- Breakdown matrix (Customer Nature × chosen dimension) -->
+            <div v-if="result.breakdown_dimension && result.columns?.length" class="border-t border-mp-border overflow-x-auto">
+              <div class="px-6 pt-5 pb-3">
+                <p class="text-xs font-semibold text-white uppercase tracking-widest">
+                  Breakdown by {{ dimensionFields[result.breakdown_dimension] || result.breakdown_dimension }}
+                  <span class="text-mp-muted font-normal normal-case">— {{ result.breakdown_metric === 'quantity' ? 'Quantity' : 'Value' }}</span>
+                </p>
+              </div>
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="border-b border-mp-border">
+                    <th class="text-left text-xs font-semibold text-white uppercase px-4 py-3 sticky left-0 bg-mp-card min-w-32">Customer Nature</th>
+                    <th v-for="col in result.columns" :key="col" class="text-right text-xs font-semibold text-white uppercase px-4 py-3 whitespace-nowrap">{{ col }}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800">
+                  <tr v-for="(cat, key) in result.categories" :key="key" class="hover:bg-mp-card-hover/50">
+                    <td class="px-4 py-3 text-mp-text-secondary font-medium sticky left-0 bg-mp-card">{{ natureLabel(cat.label) }}</td>
+                    <td v-for="col in result.columns" :key="col" class="px-4 py-3 text-right"
+                      :class="cat[col] > 0 ? 'text-mp-text' : 'text-mp-muted'">
+                      {{ cat[col] > 0 ? fmt(cat[col]) : '—' }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
             <!-- Donut Chart -->
             <div class="px-6 py-6 border-t border-mp-border">
@@ -971,6 +1138,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { Head, Link } from '@inertiajs/vue3'
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue'
 import DimensionMultiSelect from '@/Components/DimensionMultiSelect.vue'
+import DimensionSingleSelect from '@/Components/DimensionSingleSelect.vue'
 import { generateDistinctColors, shadeColor } from '@/Utils/chartColors'
 import axios from 'axios'
 
@@ -986,6 +1154,30 @@ const props = defineProps({
 const running     = ref(false)
 const exporting   = ref(false)
 const result      = ref(null)
+
+// Basket Affinity: clickable column sort (defaults to Co-Product Net Sales,
+// largest first, but the user can re-sort by any column either direction).
+const basketColumns = [
+  { key: 'co_invoices',     label: 'Invoices Together' },
+  { key: 'affinity_pct',    label: 'Affinity %' },
+  { key: 'co_sales',        label: 'Co-Product Net Sales' },
+  { key: 'co_sales_pct',    label: "% of Co-Product's Total Sales" },
+  { key: 'co_quantity',     label: 'Co-Product Net Quantity' },
+  { key: 'co_quantity_pct', label: "% of Co-Product's Total Quantity" },
+]
+const basketSort = ref({ key: 'co_sales', dir: 'desc' })
+function setBasketSort(key) {
+  if (basketSort.value.key === key) {
+    basketSort.value.dir = basketSort.value.dir === 'desc' ? 'asc' : 'desc'
+  } else {
+    basketSort.value = { key, dir: 'desc' }
+  }
+}
+const sortedBasketRows = computed(() => {
+  if (!result.value || result.value.type !== 'basket_affinity') return []
+  const { key, dir } = basketSort.value
+  return [...result.value.rows].sort((a, b) => dir === 'desc' ? b[key] - a[key] : a[key] - b[key])
+})
 const rankPopup   = ref(null)
 const naturePopup = ref(null)
 const expanded    = ref(new Set())
@@ -1023,6 +1215,7 @@ function alpha(hex, a) {
 // ── Render chart after result loads ──
 watch(result, async (val) => {
   if (!val) { destroyChart(); return }
+  if (val.type === 'basket_affinity') basketSort.value = { key: 'co_sales', dir: 'desc' }
   await nextTick()
   await loadChart()
   await nextTick()
@@ -1318,6 +1511,9 @@ const params = ref({
   dim2_items:     [],  // Two Factors Trend / Matrix: specific Factor 2 / column items, or [] = Top N + Others
   invoice_view:      'snapshot', // Invoice Analysis: 'snapshot' | 'by_dimension' | 'large_invoices'
   invoice_threshold: 1000000,    // Invoice Analysis: large-invoice threshold
+  breakdown_dimension: '',       // Customer Nature: optional cross-tab dimension
+  breakdown_metric:    'net_sales_value', // Customer Nature breakdown: 'net_sales_value' | 'quantity'
+  focus_item: null,              // Basket Affinity: the one product to analyze
 })
 
 // ── Period Comparison: 2-5 periods ──
@@ -1337,10 +1533,12 @@ const allPeriods = computed(() => [
 // The multi-selector sorts/filters based on the LATEST period the user picked.
 const latestPeriod = computed(() => allPeriods.value[allPeriods.value.length - 1] || { from: '', to: '' })
 
-// Auto-switch dimension1 when user selects ranking report type
+// Auto-switch dimension1 when user selects ranking or discount dependency
 watch(() => params.value.report_type, (newType) => {
   if (newType === 'ranking') {
     params.value.dimension1 = defaultRankDim.value
+  } else if (newType === 'discount_dependency' && params.value.dimension1 === defaultRankDim.value) {
+    params.value.dimension1 = 'product_item' in props.dimensionFields ? 'product_item' : defaultDim1
   } else if (params.value.dimension1 === defaultRankDim.value) {
     params.value.dimension1 = defaultDim1
   }
@@ -1351,18 +1549,26 @@ const showPeriodSelector = computed(() =>
   ['trend', 'two_factors_trend'].includes(params.value.report_type)
 )
 const showDimension1 = computed(() =>
-  ['single_dimension', 'matrix', 'ranking', 'period_comparison', 'two_factors_trend'].includes(params.value.report_type)
+  ['single_dimension', 'matrix', 'ranking', 'period_comparison', 'two_factors_trend', 'discount_dependency'].includes(params.value.report_type)
+)
+const showMetric = computed(() =>
+  !['discount_dependency', 'basket_affinity'].includes(params.value.report_type)
 )
 const showDimension2 = computed(() =>
   ['matrix', 'two_factors_trend'].includes(params.value.report_type)
 )
 const dimension1Label = computed(() => {
   const map = {
-    matrix:            'Dimension 1 (Rows)',
-    two_factors_trend: 'Factor 1 (Parent Rows)',
-    ranking:           'Rank By (Product/Category/Item)',
+    matrix:              'Dimension 1 (Rows)',
+    two_factors_trend:   'Factor 1 (Parent Rows)',
+    ranking:              'Rank By (Product/Category/Item)',
+    discount_dependency: 'Break Down By',
   }
   return map[params.value.report_type] ?? 'Dimension'
+})
+const customerNatureBreakdownDims = computed(() => {
+  const allowed = ['product_item', 'branch', 'sales_channel', 'business_sector', 'sales_person']
+  return allowed.filter(k => props.dimensionFields[k])
 })
 const dimension2Label = computed(() => {
   const map = {
@@ -1485,6 +1691,14 @@ function aggregate(values, metric) {
   if (nums.length === 0) return 0
   const sum = nums.reduce((s, v) => s + v, 0)
   return NON_ADDITIVE_METRICS.includes(metric) ? sum / nums.length : sum
+}
+
+// Blended discount % across every row — total discount ÷ total gross,
+// not an average of each row's own %, which would overweight small items.
+function blendedDiscountPct(rows) {
+  const gross = rows.reduce((s, r) => s + r.gross, 0)
+  const disc  = rows.reduce((s, r) => s + r.total_discount, 0)
+  return gross > 0 ? (disc / gross * 100).toFixed(2) : '0.00'
 }
 
 function getTrendChange(rows, i) {
