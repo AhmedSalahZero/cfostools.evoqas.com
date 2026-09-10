@@ -35,6 +35,7 @@ class UserManagementController extends Controller
         'surveys'                => 'Surveys',
         'statistica'             => 'Statistica',
         'projects'               => 'Projects & Tasks',
+        'business_radar'         => 'Business Radar',
     ];
 
     public function index()

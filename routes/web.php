@@ -494,6 +494,30 @@ Route::prefix('organizations/{orgId}/statistica')
             Route::post('/{company}/save',               [App\Http\Controllers\InvestorDecisionController::class, 'saveEvaluation'])->name('save');
     });
 
+    // ══════════════════════════════════════════════════════════════════════════════
+    // BUSINESS RADAR ROUTES
+    // ══════════════════════════════════════════════════════════════════════════════
+
+    Route::prefix('portfolio-companies/{company}/business-radar')
+        ->name('business-radar.')
+        ->group(function () {
+            Route::get('/',        [App\Http\Controllers\BusinessRadarController::class, 'index'])->name('index');
+            Route::post('/',       [App\Http\Controllers\BusinessRadarController::class, 'store'])->name('store');
+            Route::put('/{board}', [App\Http\Controllers\BusinessRadarController::class, 'update'])->name('update');
+            Route::delete('/{board}', [App\Http\Controllers\BusinessRadarController::class, 'destroy'])->name('destroy');
+            Route::get('/{board}', [App\Http\Controllers\BusinessRadarController::class, 'show'])->name('show');
+
+            Route::post('/{board}/items',              [App\Http\Controllers\BusinessRadarController::class, 'storeItem'])->name('items.store');
+            Route::put('/{board}/items/{item}',         [App\Http\Controllers\BusinessRadarController::class, 'updateItem'])->name('items.update');
+            Route::delete('/{board}/items/{item}',      [App\Http\Controllers\BusinessRadarController::class, 'destroyItem'])->name('items.destroy');
+
+            Route::post('/{board}/links',               [App\Http\Controllers\BusinessRadarController::class, 'storeLink'])->name('links.store');
+            Route::delete('/{board}/links/{link}',      [App\Http\Controllers\BusinessRadarController::class, 'destroyLink'])->name('links.destroy');
+
+            Route::post('/areas',                       [App\Http\Controllers\BusinessRadarController::class, 'storeArea'])->name('areas.store');
+            Route::delete('/areas/{area}',               [App\Http\Controllers\BusinessRadarController::class, 'destroyArea'])->name('areas.destroy');
+        });
+
     // ══════════════════════════════════════════════════════════════════════════
 // USER TASKS ROUTES
 // Add inside the Route::middleware(['auth'])->group() block

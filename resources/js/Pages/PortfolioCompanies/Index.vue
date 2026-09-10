@@ -258,6 +258,19 @@
 																</svg>
 															</span> Financial Studies
 														</Link>
+														<Link v-if="canAccess(customer, 'business_radar')"
+															:href="`/portfolio-companies/${customer.id}/business-radar`"
+															class="flex items-center gap-3 px-4 py-2.5 text-sm text-white hover:bg-mp-page hover:text-white transition-colors">
+															<span
+																class="w-7 h-7 bg-mp-danger/20 rounded-lg flex items-center justify-center flex-shrink-0">
+																<svg class="w-3.5 h-3.5 text-white" fill="none"
+																	stroke="currentColor" viewBox="0 0 24 24">
+																	<path stroke-linecap="round" stroke-linejoin="round"
+																		stroke-width="2"
+																		d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+																</svg>
+															</span> Business Radar
+														</Link>
 														<Link :href="`/portfolio-companies/${customer.id}/model-studio`"
 															class="flex items-center gap-3 px-4 py-2.5 text-sm text-white hover:bg-mp-page hover:text-white transition-colors">
 															<span

@@ -60,6 +60,7 @@ class PortfolioCompanyController extends Controller
                         'statistica' => $user->hasRole('super-admin')
                             || ($user->hasRole('admin') && (int) $user->organization_id === (int) $company->organization_id)
                             || $user->hasCompanyPermission($company->id, 'statistica'),
+                        'business_radar' => $user->canAccessPortfolioCompany($company, 'business_radar'),
                     ],
                 ];
             });
