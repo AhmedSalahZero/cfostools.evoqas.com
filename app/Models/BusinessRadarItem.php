@@ -12,6 +12,8 @@ class BusinessRadarItem extends Model
         'title',
         'description',
         'duration_months',
+        'es_date',
+        'ef_date',
         'status',
         'notes',
         'created_by',
@@ -19,6 +21,8 @@ class BusinessRadarItem extends Model
 
     protected $casts = [
         'duration_months' => 'integer',
+        'es_date'         => 'date',
+        'ef_date'         => 'date',
     ];
 
     // 999 is the internal sentinel for "more than 24 months"
@@ -57,7 +61,8 @@ class BusinessRadarItem extends Model
         self::PHASE_MONITOR    => 'Monitor',
     ];
 
-    const RESOLVED_STATUSES = ['resolved', 'captured'];
+    // 'done' is the Discussed Direction equivalent of resolved/captured.
+    const RESOLVED_STATUSES = ['resolved', 'captured', 'done'];
 
     public function board()
     {
@@ -92,6 +97,19 @@ class BusinessRadarItem extends Model
         return $this->hasMany(BusinessRadarLink::class, 'potential_item_id');
     }
 
+    // Discussed Direction items that reference this Challenge/Potential.
+    public function referencedByDirections()
+    {
+        return $this->hasMany(BusinessRadarDirectionLink::class, 'linked_item_id');
+    }
+
+    // When this item IS a Discussed Direction item: the Challenges/
+    // Potentials it points back to.
+    public function directionLinks()
+    {
+        return $this->hasMany(BusinessRadarDirectionLink::class, 'direction_item_id');
+    }
+
     public function scopeActive($query)
     {
         return $query->whereNotIn('status', self::RESOLVED_STATUSES);
@@ -114,6 +132,16 @@ class BusinessRadarItem extends Model
             $this->load('areas');
         }
         return $this->areas->max('pivot.impact_score') ?? 3;
+    }
+
+    public function getEsDateLabelAttribute(): ?string
+    {
+        return $this->es_date?->format('d M Y');
+    }
+
+    public function getEfDateLabelAttribute(): ?string
+    {
+        return $this->ef_date?->format('d M Y');
     }
 
     public function getDurationLabelAttribute(): string

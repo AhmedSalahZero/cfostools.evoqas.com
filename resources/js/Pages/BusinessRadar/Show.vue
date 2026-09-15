@@ -113,6 +113,71 @@
 						:items="filteredPotentials" :areas="areas" :opposite-items="filteredChallenges"
 						@add="openAddForm" @edit="openEditForm" @delete="deleteItem" @link="openLinkModal" />
 				</div>
+
+				<!-- ── DISCUSSED DIRECTION ── -->
+				<div id="direction" class="bg-mp-card border border-mp-border rounded-xl p-5">
+					<div class="flex items-center justify-between mb-1">
+						<h2 class="text-sm font-semibold text-white uppercase tracking-widest flex items-center gap-2">
+							<span class="inline-block w-2.5 h-2.5 rounded-full bg-mp-gold"></span>
+							{{ directionLabelDisplay }} ({{ filteredDirections.length }})
+							<button @click="renameDirectionSection"
+								class="text-white/30 hover:text-white text-xs font-normal normal-case tracking-normal">✎ rename</button>
+						</h2>
+						<button @click="openAddForm('direction')"
+							class="text-xs px-3 py-1.5 rounded-lg bg-mp-card-hover border border-mp-border text-white hover:border-mp-gold">
+							+ Add
+						</button>
+					</div>
+					<p class="text-[11px] text-white/40 mb-4">
+						What you've decided to do about the Challenges &amp; Potentials above — each line can link back to
+						them and carries its own start / finish dates.
+					</p>
+					<div class="space-y-2">
+						<div v-for="item in sortedDirections" :key="item.id"
+							class="bg-mp-card-hover border border-mp-border rounded-lg p-3">
+							<div class="flex items-start justify-between gap-2 mb-1.5">
+								<p class="text-sm text-white font-medium">{{ item.title }}</p>
+								<div class="flex items-center gap-1 flex-shrink-0">
+									<button class="text-white/40 hover:text-white text-xs" @click="openEditForm(item)">✎</button>
+									<button class="text-white/40 hover:text-mp-danger text-xs" @click="deleteItem(item)">✕</button>
+								</div>
+							</div>
+							<p v-if="item.description" class="text-xs text-white/60 mb-2">{{ item.description }}</p>
+							<div class="flex flex-wrap items-center gap-1.5 text-[11px] mb-1.5">
+								<span v-for="a in item.areas" :key="a.id" class="px-2 py-0.5 rounded-full bg-white/10 text-white/70">
+									{{ a.name }} · {{ a.impact_score }}
+								</span>
+							</div>
+							<div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+								<span class="px-2 py-0.5 rounded-full bg-white/10 text-white/70">Impact {{ item.impact_score }}</span>
+								<span class="px-2 py-0.5 rounded-full bg-white/10 text-white/70">{{ item.duration_label }}</span>
+								<span v-if="item.es_date_label" class="px-2 py-0.5 rounded-full bg-mp-gold/10 text-mp-gold">
+									ES {{ item.es_date_label }}
+								</span>
+								<span v-if="item.ef_date_label" class="px-2 py-0.5 rounded-full bg-mp-gold/10 text-mp-gold">
+									EF {{ item.ef_date_label }}
+								</span>
+								<span class="px-2 py-0.5 rounded-full bg-white/5 text-white/50 capitalize">{{ item.status.replace('_', ' ') }}</span>
+							</div>
+							<p v-if="item.linked_items?.length" class="text-[11px] text-white/40 mt-2">
+								Addresses: {{ item.linked_items.map(l => l.title).join(', ') }}
+							</p>
+						</div>
+						<p v-if="sortedDirections.length === 0" class="text-xs text-white/30 italic">Nothing here yet</p>
+					</div>
+				</div>
+
+				<!-- ── DISCUSSED DIRECTION TIMELINE ── -->
+				<div class="bg-mp-card border border-mp-border rounded-xl p-5">
+					<h2 class="text-sm font-semibold text-white uppercase tracking-widest mb-1">
+						{{ directionLabelDisplay }} timeline
+					</h2>
+					<p class="text-[11px] text-white/40 mb-3">Each bar runs from its ES (start) to EF (finish) date · color = status</p>
+					<div v-if="sortedDirections.length" :style="{ height: Math.max(160, sortedDirections.length * 42) + 'px' }">
+						<canvas ref="directionChartCanvas"></canvas>
+					</div>
+					<p v-else class="text-xs text-white/30 italic">Add a {{ directionLabelDisplay.toLowerCase() }} item with ES/EF dates to see it plotted here</p>
+				</div>
 			</div>
 		</div>
 
@@ -121,7 +186,7 @@
 			@click.self="itemModal.show = false">
 			<div class="bg-mp-card border border-mp-border rounded-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
 				<h3 class="text-lg font-semibold text-white mb-4">
-					{{ itemModal.editing ? 'Edit' : 'New' }} {{ itemModal.type === 'challenge' ? 'challenge' : 'potential' }}
+					{{ itemModal.editing ? 'Edit' : 'New' }} {{ itemModalTypeLabel }}
 				</h3>
 				<form @submit.prevent="submitItem">
 					<label class="block text-xs text-white/70 uppercase tracking-widest mb-1.5">Title</label>
@@ -164,7 +229,7 @@
 					<textarea v-model="itemForm.description" rows="2"
 						class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-sm text-white mb-4 focus:outline-none focus:border-mp-teal"></textarea>
 
-					<div class="mb-4">
+					<div v-if="itemModal.type !== 'direction'" class="mb-4">
 						<label class="block text-xs text-white/70 uppercase tracking-widest mb-1.5">
 							{{ itemModal.type === 'challenge' ? 'Time to resolve' : 'Time to activate' }}
 							({{ durationLabel(itemForm.duration_months) }})
@@ -175,14 +240,45 @@
 							class="w-full" />
 					</div>
 
+					<template v-if="itemModal.type === 'direction'">
+						<div class="grid grid-cols-2 gap-3 mb-4">
+							<div>
+								<label class="block text-xs text-white/70 uppercase tracking-widest mb-1.5">ES (start)</label>
+								<input v-model="itemForm.es_date" type="date"
+									class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-mp-teal" />
+							</div>
+							<div>
+								<label class="block text-xs text-white/70 uppercase tracking-widest mb-1.5">EF (finish)</label>
+								<input v-model="itemForm.ef_date" type="date" :min="itemForm.es_date || undefined"
+									class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-mp-teal" />
+							</div>
+						</div>
+						<p class="text-[11px] text-white/40 -mt-3 mb-4">
+							Time-weighting for ordering is calculated automatically from these dates — no separate duration to set.
+						</p>
+
+						<label class="block text-xs text-white/70 uppercase tracking-widest mb-1.5">
+							Addresses these Challenges / Potentials
+						</label>
+						<div class="max-h-40 overflow-y-auto space-y-1.5 mb-4 bg-mp-card-hover border border-mp-border rounded-lg p-2.5">
+							<label v-for="c in linkableItems" :key="c.id"
+								class="flex items-center gap-2 text-xs text-white/80 px-1 py-1">
+								<input type="checkbox" :value="c.id" v-model="itemForm.linked_item_ids" class="rounded border-mp-border" />
+								<span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="c.type === 'challenge' ? 'bg-mp-danger' : 'bg-mp-teal'"></span>
+								{{ c.title }}
+							</label>
+							<p v-if="linkableItems.length === 0" class="text-xs text-white/30 italic px-1">
+								No challenges or potentials on this board yet
+							</p>
+						</div>
+					</template>
+
 					<label class="block text-xs text-white/70 uppercase tracking-widest mb-1.5">Status</label>
 					<select v-model="itemForm.status"
 						class="w-full bg-mp-card-hover border border-mp-border rounded-lg px-3 py-2.5 text-sm text-white mb-4 focus:outline-none">
 						<option value="open">Open</option>
 						<option value="in_progress">In progress</option>
-						<option :value="itemModal.type === 'challenge' ? 'resolved' : 'captured'">
-							{{ itemModal.type === 'challenge' ? 'Resolved' : 'Captured' }}
-						</option>
+						<option :value="resolvedStatusValue">{{ resolvedStatusLabel }}</option>
 					</select>
 
 					<label class="block text-xs text-white/70 uppercase tracking-widest mb-1.5">Notes</label>
@@ -260,6 +356,18 @@ const props = defineProps({
 	durationOptions: { type: Array, default: () => [] },
 })
 
+const directionLabelDisplay = computed(() => props.board.direction_label || 'Discussed Direction')
+
+function renameDirectionSection() {
+	const name = prompt('Rename this section:', directionLabelDisplay.value)
+	if (!name) return
+	router.put(baseUrl, {
+		name: props.board.name,
+		description: props.board.description,
+		direction_label: name,
+	}, { preserveScroll: true })
+}
+
 const baseUrl = `/portfolio-companies/${props.company.id}/business-radar/${props.board.id}`
 
 const showResolved = ref(false)
@@ -279,7 +387,7 @@ function hasBonus(item) {
 	return item.combined_priority_score > item.priority_score
 }
 
-const resolvedStatuses = ['resolved', 'captured']
+const resolvedStatuses = ['resolved', 'captured', 'done']
 
 function itemHasArea(item, areaId) {
 	return (item.areas || []).some(a => a.id === areaId)
@@ -293,6 +401,19 @@ function passesFilters(item) {
 
 const filteredChallenges = computed(() => props.items.filter(i => i.type === 'challenge' && passesFilters(i)))
 const filteredPotentials = computed(() => props.items.filter(i => i.type === 'potential' && passesFilters(i)))
+const filteredDirections = computed(() => props.items.filter(i => i.type === 'direction' && passesFilters(i)))
+
+// Same "order by weight/time" logic as Challenges & Potentials (priority = impact x speed)
+const sortedDirections = computed(() =>
+	[...filteredDirections.value].sort((a, b) => b.priority_score - a.priority_score)
+)
+
+// Challenges/Potentials this board has, for the "addresses" checklist —
+// unaffected by the resolved/area filters so a direction can still point
+// at something already marked resolved/captured.
+const linkableItems = computed(() =>
+	props.items.filter(i => i.type === 'challenge' || i.type === 'potential')
+)
 
 // ── Priority ranking: impact x speed, plus linked-item bonus, best quick wins first ──
 const priorityRanking = computed(() =>
@@ -310,7 +431,7 @@ const phaseMeta = {
 }
 
 const phaseColumns = computed(() => {
-	const active = props.items.filter(i => !resolvedStatuses.includes(i.status) && (!areaFilter.value || itemHasArea(i, areaFilter.value)))
+	const active = props.items.filter(i => i.type !== 'direction' && !resolvedStatuses.includes(i.status) && (!areaFilter.value || itemHasArea(i, areaFilter.value)))
 	return Object.entries(phaseMeta).map(([key, meta]) => ({
 		key,
 		...meta,
@@ -321,23 +442,37 @@ const phaseColumns = computed(() => {
 // ── Chart ──
 const chartCanvas = ref(null)
 let chartInstance = null
+const directionChartCanvas = ref(null)
+let directionChartInstance = null
 
-onMounted(async () => { await nextTick(); buildChart() })
+onMounted(async () => {
+	await nextTick()
+	buildChart()
+	buildDirectionChart()
+
+	if (new URLSearchParams(window.location.search).get('openDirection') === '1') {
+		document.getElementById('direction')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+		openAddForm('direction')
+	}
+})
 watch([filteredChallenges, filteredPotentials], async () => { await nextTick(); buildChart() })
+watch(sortedDirections, async () => { await nextTick(); buildDirectionChart() })
+
+function ensureChartJs(callback) {
+	if (typeof Chart !== 'undefined') { callback(); return }
+	const existing = document.getElementById('mp-chartjs-cdn')
+	if (existing) { existing.addEventListener('load', callback, { once: true }); return }
+	const script = document.createElement('script')
+	script.id = 'mp-chartjs-cdn'
+	script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'
+	script.onload = callback
+	document.head.appendChild(script)
+}
 
 function buildChart() {
 	if (!chartCanvas.value) return
 	if (chartInstance) { chartInstance.destroy(); chartInstance = null }
-
-	const ctx = chartCanvas.value.getContext('2d')
-	if (typeof Chart === 'undefined') {
-		const script = document.createElement('script')
-		script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'
-		script.onload = () => renderChart(ctx)
-		document.head.appendChild(script)
-	} else {
-		renderChart(ctx)
-	}
+	ensureChartJs(() => renderChart(chartCanvas.value.getContext('2d')))
 }
 
 function renderChart(ctx) {
@@ -408,25 +543,116 @@ function renderChart(ctx) {
 	})
 }
 
+// ── Discussed Direction timeline (Gantt-style floating bars, ES → EF) ──
+const statusColors = {
+	open:        '#c9a84c', // mp-gold
+	in_progress: '#00b4c8', // mp-teal
+	done:        '#ffffff4d',
+}
+
+function buildDirectionChart() {
+	if (!directionChartCanvas.value) return
+	if (directionChartInstance) { directionChartInstance.destroy(); directionChartInstance = null }
+	if (sortedDirections.value.length === 0) return
+	ensureChartJs(() => renderDirectionChart(directionChartCanvas.value.getContext('2d')))
+}
+
+function renderDirectionChart(ctx) {
+	// Chart displayed top-to-bottom in the same order as the list above.
+	const rows = [...sortedDirections.value].reverse()
+
+	const dayMs = 24 * 60 * 60 * 1000
+	const toDay = (dateStr) => Math.floor(new Date(dateStr).getTime() / dayMs)
+	const todayDay = toDay(new Date().toISOString().slice(0, 10))
+
+	const bars = rows.map(item => {
+		const hasEs = !!item.es_date
+		const hasEf = !!item.ef_date
+		const start = hasEs ? toDay(item.es_date) : (hasEf ? toDay(item.ef_date) - 30 : todayDay)
+		const end   = hasEf ? toDay(item.ef_date) : start + Math.max(30, item.duration_months * 30)
+		return { range: [start, Math.max(end, start + 1)], item }
+	})
+
+	const allDays = bars.flatMap(b => b.range)
+	const minDay = Math.min(...allDays, todayDay) - 3
+	const maxDay = Math.max(...allDays, todayDay) + 3
+
+	const dayToLabel = (day) => new Date(day * dayMs).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+
+	directionChartInstance = new Chart(ctx, {
+		type: 'bar',
+		data: {
+			labels: rows.map(item => item.title),
+			datasets: [{
+				data: bars.map(b => b.range),
+				backgroundColor: bars.map(b => statusColors[b.item.status] || statusColors.open),
+				borderRadius: 4,
+				barPercentage: 0.6,
+			}],
+		},
+		options: {
+			indexAxis: 'y',
+			responsive: true,
+			maintainAspectRatio: false,
+			scales: {
+				x: {
+					min: minDay, max: maxDay,
+					ticks: { color: '#ffffff99', callback: (v) => dayToLabel(v) },
+					grid: { color: '#ffffff1a' },
+				},
+				y: {
+					ticks: { color: '#ffffffcc', autoSkip: false },
+					grid: { display: false },
+				},
+			},
+			plugins: {
+				legend: { display: false },
+				tooltip: {
+					callbacks: {
+						title: (items) => rows[items[0].dataIndex].title,
+						label: (c) => {
+							const item = rows[c.dataIndex]
+							const range = item.es_date_label && item.ef_date_label
+								? `${item.es_date_label} → ${item.ef_date_label}`
+								: 'Dates not fully set — estimated bar'
+							return `${range} · ${item.status.replace('_', ' ')} · priority ${item.priority_score}`
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
 // ── Add / Edit item ──
 const itemModal = reactive({ show: false, editing: null, type: 'challenge' })
 const itemForm = reactive({
 	title: '',
 	description: '',
 	duration_months: 1,
+	es_date: '',
+	ef_date: '',
 	status: 'open',
 	notes: '',
 	areas: [{ business_radar_area_id: null, impact_score: 3 }],
+	linked_item_ids: [],
 })
+
+const itemModalTypeLabel = computed(() => ({ challenge: 'challenge', potential: 'potential', direction: directionLabelDisplay.value.toLowerCase() }[itemModal.type]))
+const resolvedStatusValue = computed(() => ({ challenge: 'resolved', potential: 'captured', direction: 'done' }[itemModal.type]))
+const resolvedStatusLabel = computed(() => ({ challenge: 'Resolved', potential: 'Captured', direction: 'Done' }[itemModal.type]))
 
 function resetItemForm() {
 	Object.assign(itemForm, {
 		title: '',
 		description: '',
 		duration_months: 1,
+		es_date: '',
+		ef_date: '',
 		status: 'open',
 		notes: '',
 		areas: [{ business_radar_area_id: null, impact_score: 3 }],
+		linked_item_ids: [],
 	})
 }
 
@@ -453,11 +679,14 @@ function openEditForm(item) {
 		title: item.title,
 		description: item.description ?? '',
 		duration_months: item.duration_months,
+		es_date: item.es_date ?? '',
+		ef_date: item.ef_date ?? '',
 		status: item.status,
 		notes: item.notes ?? '',
 		areas: item.areas?.length
 			? item.areas.map(a => ({ business_radar_area_id: a.id, impact_score: a.impact_score }))
 			: [{ business_radar_area_id: null, impact_score: 3 }],
+		linked_item_ids: item.linked_items?.map(l => l.item_id) ?? [],
 	})
 	itemModal.show = true
 }

@@ -93,6 +93,14 @@
 								</span>
 							</div>
 						</Link>
+						<div class="px-5 pb-5">
+							<Link :href="`/portfolio-companies/${company.id}/business-radar/${board.id}?openDirection=1#direction`"
+								class="flex items-center justify-center gap-2 w-full bg-mp-card-hover border border-mp-border hover:border-mp-gold text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+								<span class="w-1.5 h-1.5 rounded-full bg-mp-gold flex-shrink-0"></span>
+								{{ board.direction_label_display || 'Discussed Direction' }}
+								<span class="text-white/40">({{ board.directions_count }})</span>
+							</Link>
+						</div>
 					</div>
 				</div>
 			</div>

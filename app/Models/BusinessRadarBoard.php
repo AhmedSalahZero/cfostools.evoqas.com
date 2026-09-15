@@ -10,8 +10,16 @@ class BusinessRadarBoard extends Model
         'portfolio_company_id',
         'name',
         'description',
+        'direction_label',
         'created_by',
     ];
+
+    // Default label for the "Discussed Direction" section (rest of the
+    // schema always stores the type as 'direction'; only the display
+    // label is user-editable, per board).
+    const DEFAULT_DIRECTION_LABEL = 'Discussed Direction';
+
+    protected $appends = ['direction_label_display'];
 
     public function portfolioCompany()
     {
@@ -36,5 +44,15 @@ class BusinessRadarBoard extends Model
     public function potentials()
     {
         return $this->items()->where('type', 'potential');
+    }
+
+    public function directions()
+    {
+        return $this->items()->where('type', 'direction');
+    }
+
+    public function getDirectionLabelDisplayAttribute(): string
+    {
+        return $this->direction_label ?: self::DEFAULT_DIRECTION_LABEL;
     }
 }

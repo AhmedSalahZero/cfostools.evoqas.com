@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BusinessRadarArea;
 use App\Models\BusinessRadarBoard;
+use App\Models\BusinessRadarDirectionLink;
 use App\Models\BusinessRadarItem;
 use App\Models\BusinessRadarLink;
 use App\Models\PortfolioCompany;
@@ -30,6 +31,7 @@ class BusinessRadarController extends Controller
             ->withCount([
                 'items as challenges_count' => fn ($q) => $q->where('type', 'challenge'),
                 'items as potentials_count' => fn ($q) => $q->where('type', 'potential'),
+                'items as directions_count' => fn ($q) => $q->where('type', 'direction'),
             ])
             ->orderByDesc('updated_at')
             ->get();
@@ -66,8 +68,9 @@ class BusinessRadarController extends Controller
         $this->authorizeRadar($company);
 
         $data = $request->validate([
-            'name'        => 'required|string|max:255',
-            'description' => 'nullable|string',
+            'name'            => 'required|string|max:255',
+            'description'     => 'nullable|string',
+            'direction_label' => 'nullable|string|max:255',
         ]);
 
         $board->update($data);
@@ -95,6 +98,8 @@ class BusinessRadarController extends Controller
                 'areas',
                 'linksAsChallenge.potential.areas',
                 'linksAsPotential.challenge.areas',
+                'directionLinks.linkedItem',
+                'referencedByDirections.direction',
             ])
             ->orderByDesc('created_at')
             ->get()
@@ -115,6 +120,10 @@ class BusinessRadarController extends Controller
                     'notes'                   => $item->notes,
                     'phase'                   => $item->phase,
                     'phase_label'             => $item->phase_label,
+                    'es_date'                 => $item->es_date?->format('Y-m-d'),
+                    'ef_date'                 => $item->ef_date?->format('Y-m-d'),
+                    'es_date_label'           => $item->es_date_label,
+                    'ef_date_label'           => $item->ef_date_label,
                     'areas'                   => $item->areas->map(fn ($a) => [
                         'id'           => $a->id,
                         'name'         => $a->name,
@@ -127,12 +136,30 @@ class BusinessRadarController extends Controller
                             'item_id'     => $l->potential_item_id,
                             'title'       => $l->potential?->title,
                         ])
-                        : $item->linksAsPotential->map(fn ($l) => [
-                            'link_id'     => $l->id,
-                            'strength'    => $l->strength,
-                            'item_id'     => $l->challenge_item_id,
-                            'title'       => $l->challenge?->title,
-                        ]),
+                        : ($item->type === 'potential'
+                            ? $item->linksAsPotential->map(fn ($l) => [
+                                'link_id'     => $l->id,
+                                'strength'    => $l->strength,
+                                'item_id'     => $l->challenge_item_id,
+                                'title'       => $l->challenge?->title,
+                            ])
+                            : []),
+                    // Discussed Direction item -> the Challenges/Potentials it references
+                    'linked_items' => $item->type === 'direction'
+                        ? $item->directionLinks->map(fn ($l) => [
+                            'link_id' => $l->id,
+                            'item_id' => $l->linked_item_id,
+                            'title'   => $l->linkedItem?->title,
+                            'type'    => $l->linkedItem?->type,
+                        ])
+                        : [],
+                    // Challenge/Potential -> which Discussed Direction items reference it
+                    'referenced_by' => $item->type !== 'direction'
+                        ? $item->referencedByDirections->map(fn ($l) => [
+                            'item_id' => $l->direction_item_id,
+                            'title'   => $l->direction?->title,
+                        ])
+                        : [],
                 ];
             });
 
@@ -144,7 +171,7 @@ class BusinessRadarController extends Controller
 
         return Inertia::render('BusinessRadar/Show', [
             'company'         => $company->only(['id', 'name']),
-            'board'           => $board->only(['id', 'name', 'description']),
+            'board'           => $board->only(['id', 'name', 'description', 'direction_label']),
             'items'           => $items,
             'areas'           => $areas,
             'durationOptions' => collect(BusinessRadarItem::DURATION_OPTIONS)
@@ -161,27 +188,47 @@ class BusinessRadarController extends Controller
     {
         $this->authorizeRadar($company);
 
+        $isDirection = $request->input('type') === 'direction';
+
         $data = $request->validate([
-            'type'                          => ['required', Rule::in(['challenge', 'potential'])],
+            'type'                          => ['required', Rule::in(['challenge', 'potential', 'direction'])],
             'title'                         => 'required|string|max:255',
             'description'                   => 'nullable|string',
-            'duration_months'               => ['required', Rule::in(array_keys(BusinessRadarItem::DURATION_OPTIONS))],
+            'duration_months'               => $isDirection
+                ? 'nullable'
+                : ['required', Rule::in(array_keys(BusinessRadarItem::DURATION_OPTIONS))],
+            'es_date'                       => 'nullable|date',
+            'ef_date'                       => 'nullable|date|after_or_equal:es_date',
             'status'                        => 'nullable|string|max:32',
             'notes'                         => 'nullable|string',
             'areas'                         => 'required|array|min:1',
             'areas.*.business_radar_area_id' => 'required|exists:business_radar_areas,id',
             'areas.*.impact_score'           => 'required|integer|min:1|max:5',
+            'linked_item_ids'               => 'nullable|array',
+            'linked_item_ids.*'             => 'exists:business_radar_items,id',
         ]);
 
         $data['status'] = $data['status'] ?? 'open';
         $areas = $data['areas'];
-        unset($data['areas']);
+        $linkedItemIds = $data['linked_item_ids'] ?? [];
+        unset($data['areas'], $data['linked_item_ids']);
+
+        // Direction items don't get a manual duration slider — the "time
+        // weight" used for ordering/priority is derived straight from
+        // EF - ES, so there's never a mismatch between the two.
+        if ($isDirection) {
+            $data['duration_months'] = $this->durationMonthsFromDates($data['es_date'] ?? null, $data['ef_date'] ?? null);
+        }
 
         $item = $board->items()->create(array_merge($data, [
             'created_by' => auth()->id(),
         ]));
 
         $item->areas()->sync($this->areasSyncPayload($areas));
+
+        if ($item->type === 'direction') {
+            $this->syncDirectionLinks($board, $item, $linkedItemIds);
+        }
 
         return back()->with('flash', ['success' => 'Item added.']);
     }
@@ -191,24 +238,98 @@ class BusinessRadarController extends Controller
         $this->authorizeRadar($company);
         abort_unless($item->business_radar_board_id === $board->id, 404);
 
+        $isDirection = $item->type === 'direction';
+
         $data = $request->validate([
             'title'                         => 'required|string|max:255',
             'description'                   => 'nullable|string',
-            'duration_months'               => ['required', Rule::in(array_keys(BusinessRadarItem::DURATION_OPTIONS))],
+            'duration_months'               => $isDirection
+                ? 'nullable'
+                : ['required', Rule::in(array_keys(BusinessRadarItem::DURATION_OPTIONS))],
+            'es_date'                       => 'nullable|date',
+            'ef_date'                       => 'nullable|date|after_or_equal:es_date',
             'status'                        => 'required|string|max:32',
             'notes'                         => 'nullable|string',
             'areas'                         => 'required|array|min:1',
             'areas.*.business_radar_area_id' => 'required|exists:business_radar_areas,id',
             'areas.*.impact_score'           => 'required|integer|min:1|max:5',
+            'linked_item_ids'               => 'nullable|array',
+            'linked_item_ids.*'             => 'exists:business_radar_items,id',
         ]);
 
         $areas = $data['areas'];
-        unset($data['areas']);
+        $linkedItemIds = $data['linked_item_ids'] ?? [];
+        unset($data['areas'], $data['linked_item_ids']);
+
+        if ($isDirection) {
+            $data['duration_months'] = $this->durationMonthsFromDates($data['es_date'] ?? null, $data['ef_date'] ?? null);
+        }
 
         $item->update($data);
         $item->areas()->sync($this->areasSyncPayload($areas));
 
+        if ($item->type === 'direction') {
+            $this->syncDirectionLinks($board, $item, $linkedItemIds);
+        }
+
         return back()->with('flash', ['success' => 'Item updated.']);
+    }
+
+    /**
+     * Derive the "time weight" (same DURATION_OPTIONS bucket the sliders
+     * use) straight from a Discussed Direction item's ES/EF dates, so
+     * priority/speed scoring stays consistent with Challenges & Potentials
+     * without ever asking the user to enter a duration twice.
+     * Falls back to the "3 months / Moderate" bucket when dates aren't
+     * both set yet (e.g. an item still being scoped out).
+     */
+    private function durationMonthsFromDates(?string $esDate, ?string $efDate): int
+    {
+        if (!$esDate || !$efDate) {
+            return 3;
+        }
+
+        $months = (int) ceil(
+            \Carbon\Carbon::parse($esDate)->diffInDays(\Carbon\Carbon::parse($efDate)) / 30
+        );
+        $months = max(1, $months);
+
+        foreach (array_keys(BusinessRadarItem::DURATION_OPTIONS) as $bucket) {
+            if ($bucket === BusinessRadarItem::OVER_24) {
+                continue;
+            }
+            if ($months <= $bucket) {
+                return $bucket;
+            }
+        }
+
+        return BusinessRadarItem::OVER_24;
+    }
+
+    /**
+     * Replace a Discussed Direction item's links to Challenges/Potentials.
+     * Silently ignores any id that isn't a challenge/potential on this
+     * same board (e.g. another direction item, or a stray id).
+     */
+    private function syncDirectionLinks(BusinessRadarBoard $board, BusinessRadarItem $direction, array $linkedItemIds): void
+    {
+        $validIds = $board->items()
+            ->whereIn('id', $linkedItemIds)
+            ->whereIn('type', ['challenge', 'potential'])
+            ->pluck('id');
+
+        // No native belongsToMany here (direction<->item is its own table
+        // with two FKs into the same items table), so sync it by hand.
+        BusinessRadarDirectionLink::where('direction_item_id', $direction->id)
+            ->whereNotIn('linked_item_id', $validIds)
+            ->delete();
+
+        foreach ($validIds as $linkedItemId) {
+            BusinessRadarDirectionLink::firstOrCreate([
+                'direction_item_id' => $direction->id,
+                'linked_item_id'    => $linkedItemId,
+            ]);
+        }
     }
 
     /**
