@@ -412,7 +412,10 @@ const sortedDirections = computed(() =>
 // unaffected by the resolved/area filters so a direction can still point
 // at something already marked resolved/captured.
 const linkableItems = computed(() =>
-	props.items.filter(i => i.type === 'challenge' || i.type === 'potential')
+	props.items
+		.filter(i => i.type === 'challenge' || i.type === 'potential')
+		.slice()
+		.sort((a, b) => a.title.localeCompare(b.title))
 )
 
 // ── Priority ranking: impact x speed, plus linked-item bonus, best quick wins first ──
