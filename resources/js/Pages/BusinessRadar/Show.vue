@@ -147,6 +147,11 @@
 								<span v-for="a in item.areas" :key="a.id" class="px-2 py-0.5 rounded-full bg-white/10 text-white/70">
 									{{ a.name }} · {{ a.impact_score }}
 								</span>
+								<span v-if="item.created_by_name"
+									class="px-2 py-0.5 rounded-full bg-mp-gold/10 text-mp-gold/90"
+									:title="`Added by ${item.created_by_name}`">
+									👤 {{ item.created_by_name }}
+								</span>
 							</div>
 							<div class="flex flex-wrap items-center gap-1.5 text-[11px]">
 								<span class="px-2 py-0.5 rounded-full bg-white/10 text-white/70">Impact {{ item.impact_score }}</span>
@@ -802,11 +807,18 @@ const ItemColumn = defineComponent({
 						]),
 					]),
 					item.description ? h('p', { class: 'text-xs text-white/60 mb-2' }, item.description) : null,
-					h('div', { class: 'flex flex-wrap items-center gap-1.5 text-[11px] mb-1.5' },
-						(item.areas || []).map(a => h('span', {
+					h('div', { class: 'flex flex-wrap items-center gap-1.5 text-[11px] mb-1.5' }, [
+						...(item.areas || []).map(a => h('span', {
 							key: a.id,
 							class: 'px-2 py-0.5 rounded-full bg-white/10 text-white/70',
-						}, `${a.name} · ${a.impact_score}`))),
+						}, `${a.name} · ${a.impact_score}`)),
+						item.created_by_name
+							? h('span', {
+								class: 'px-2 py-0.5 rounded-full bg-mp-teal/10 text-mp-teal/90',
+								title: `Added by ${item.created_by_name}`,
+							}, `👤 ${item.created_by_name}`)
+							: null,
+					]),
 					h('div', { class: 'flex flex-wrap items-center gap-1.5 text-[11px]' }, [
 						h('span', { class: 'px-2 py-0.5 rounded-full bg-white/10 text-white/70' }, `Highest impact ${item.impact_score}`),
 						h('span', { class: 'px-2 py-0.5 rounded-full bg-white/10 text-white/70' }, item.duration_label),

@@ -96,6 +96,7 @@ class BusinessRadarController extends Controller
         $items = $board->items()
             ->with([
                 'areas',
+                'creator:id,name',
                 'linksAsChallenge.potential.areas',
                 'linksAsPotential.challenge.areas',
                 'directionLinks.linkedItem',
@@ -118,6 +119,7 @@ class BusinessRadarController extends Controller
                     'combined_priority_score' => $item->combined_priority_score,
                     'status'                  => $item->status,
                     'notes'                   => $item->notes,
+                    'created_by_name'         => $item->creator?->name,
                     'phase'                   => $item->phase,
                     'phase_label'             => $item->phase_label,
                     'es_date'                 => $item->es_date?->format('Y-m-d'),
