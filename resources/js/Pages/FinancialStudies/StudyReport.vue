@@ -213,7 +213,12 @@ function hasData(key) {
   if (key === 'manpower')        return props.manpowerData.length > 0
   if (key === 'expenses')        return props.expensesData.length > 0
   if (key === 'fixed_assets')    return props.fixedAssetsData.length > 0
-  if (key === 'opening_balance') return !!props.openingBalance?.sections
+  if (key === 'opening_balance') {
+    const ob = props.openingBalance
+    return !!(ob && (ob.sections || ob.current_assets || ob.current_liabilities
+      || ob.cash_bank != null || ob.inventory || ob.fixed_assets
+      || ob.paid_up_capital != null))
+  }
   if (key === 'setup')           return !!props.study?.name
   if (key === 'results')         return hasWriteup('results')
   return false
@@ -534,14 +539,27 @@ function buildTableData(key) {
   // ── STEP 7: Opening Balance ────────────────────────────────────────────────
   if (key === 'opening_balance') {
     const ob = props.openingBalance
-    if (!ob?.sections) return null
+    if (!ob) return null
+
+    const from = (k) => ob[k] ?? ob.sections?.[k] ?? []
+    const sumAmt = (rows) => (rows ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0)
+    const cash = Number(ob.cash_bank || 0)
+    const netFa = ob.totals?.net_fa != null
+      ? Number(ob.totals.net_fa)
+      : from('fixed_assets').reduce((s, r) => s + (Number(r.gross_amount || r.amount) || 0) - (Number(r.accum_dep) || 0), 0)
 
     const sectionDefs = [
-      { key: 'non_current_assets',      label: 'Non-Current Assets',      sign: +1 },
-      { key: 'current_assets',          label: 'Current Assets',          sign: +1 },
-      { key: 'non_current_liabilities', label: 'Non-Current Liabilities', sign: -1 },
-      { key: 'current_liabilities',     label: 'Current Liabilities',     sign: -1 },
-      { key: 'equity',                  label: 'Equity',                  sign: -1 },
+      { label: 'Net Fixed Assets',        total: netFa, items: from('fixed_assets').length, sign: +1 },
+      { label: 'Other Non-Current',       total: sumAmt(from('other_non_current')), items: from('other_non_current').length, sign: +1 },
+      { label: 'Inventory',               total: sumAmt(from('inventory')), items: from('inventory').length, sign: +1 },
+      { label: 'Cash & Bank',             total: cash, items: cash ? 1 : 0, sign: +1 },
+      { label: 'Other Current Assets',    total: sumAmt(from('current_assets')), items: from('current_assets').length, sign: +1 },
+      { label: 'Long-term Liabilities',   total: sumAmt(from('long_term_liabilities')), items: from('long_term_liabilities').length, sign: -1 },
+      { label: 'Current Liabilities',     total: sumAmt(from('current_liabilities')), items: from('current_liabilities').length, sign: -1 },
+      { label: 'Paid-up Capital',         total: Number(ob.paid_up_capital || 0), items: 1, sign: -1 },
+      { label: 'Legal Reserve',           total: Number(ob.legal_reserve || 0), items: 1, sign: -1 },
+      { label: 'Retained Earnings',       total: Number(ob.retained_earnings || 0), items: 1, sign: -1 },
+      { label: 'Other Equity',            total: sumAmt(from('equity')), items: from('equity').length, sign: -1 },
     ]
 
     const rows = []
@@ -549,17 +567,14 @@ function buildTableData(key) {
     let totalLiabEq = 0
 
     for (const sec of sectionDefs) {
-      const items = ob.sections[sec.key] ?? []
-      if (!items.length) continue
-
-      const total = items.reduce((s, r) => s + (Number(r.amount) || 0), 0)
-      if (sec.sign === 1) totalAssets  += total
-      else                totalLiabEq  += total
+      if (!sec.items && !sec.total) continue
+      if (sec.sign === 1) totalAssets  += sec.total
+      else                totalLiabEq  += sec.total
 
       rows.push({
         section: sec.label,
-        items:   items.length,
-        total:   fmtNumber(total),
+        items:   sec.items,
+        total:   fmtNumber(sec.total),
         note:    sec.sign === 1 ? 'Asset' : 'L + E',
       })
     }

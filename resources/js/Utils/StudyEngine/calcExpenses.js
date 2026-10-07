@@ -11,6 +11,7 @@ export function calcExpenses(study, expensesData, revenueByMonth) {
   const totalMonths = study.duration_years * 12
   const startYM     = toYM(study.study_start_date)
   const byMonth     = new Array(totalMonths).fill(0)
+  const financeByMonth = new Array(totalMonths).fill(0)
   const cashByMonth = new Array(totalMonths).fill(0)
   const byCat = {
     sales:         new Array(totalMonths).fill(0),
@@ -21,6 +22,7 @@ export function calcExpenses(study, expensesData, revenueByMonth) {
 
   const expensesPLByName   = {}
   const expensesCashByName = {}
+  const financeExpenseNames = []
 
   const ensureExpArray = (map, name) => {
     if (!map[name]) map[name] = new Array(totalMonths).fill(0)
@@ -36,16 +38,22 @@ export function calcExpenses(study, expensesData, revenueByMonth) {
     const si = row.start_date ? Math.max(0, monthDiff(startYM, toYM(row.start_date))) : 0
     const ei = row.end_date   ? Math.min(totalMonths - 1, monthDiff(startYM, toYM(row.end_date))) : totalMonths - 1
 
+    if (ck === 'finance' && !financeExpenseNames.includes(expName)) financeExpenseNames.push(expName)
+
     const plArr   = ensureExpArray(expensesPLByName,   expName)
     const cashArr = ensureExpArray(expensesCashByName, expName)
+    const bookPL  = (m, cost) => {
+      plArr[m] += cost
+      if (byCat[ck]) byCat[ck][m] += cost
+      if (ck === 'finance') financeByMonth[m] += cost
+      else byMonth[m] += cost
+    }
 
     if (row.expense_type === 'pct_revenue') {
       for (let m = si; m <= ei && m < totalMonths; m++) {
         const cost = (revenueByMonth[m] || 0) * ((Number(row.amount) || 0) / 100)
           * Math.pow(1 + (Number(row.annual_increase_pct) || 0) / 100, Math.floor(m / 12))
-        byMonth[m] += cost
-        plArr[m]   += cost
-        if (byCat[ck]) byCat[ck][m] += cost
+        bookPL(m, cost)
         applyPaymentPolicy(cashByMonth, m, cost, row.payment_policy ?? CASH_POLICY)
         applyPaymentPolicy(cashArr,     m, cost, row.payment_policy ?? CASH_POLICY)
       }
@@ -53,9 +61,7 @@ export function calcExpenses(study, expensesData, revenueByMonth) {
       for (let m = si; m <= ei && m < totalMonths; m++) {
         const cost = (Number(row.amount) || 0)
           * Math.pow(1 + (Number(row.annual_increase_pct) || 0) / 100, Math.floor(m / 12))
-        byMonth[m] += cost
-        plArr[m]   += cost
-        if (byCat[ck]) byCat[ck][m] += cost
+        bookPL(m, cost)
         applyPaymentPolicy(cashByMonth, m, cost, row.payment_policy ?? CASH_POLICY)
         applyPaymentPolicy(cashArr,     m, cost, row.payment_policy ?? CASH_POLICY)
       }
@@ -64,9 +70,7 @@ export function calcExpenses(study, expensesData, revenueByMonth) {
       const amort   = Math.max(1, Number(row.amortization_months) || 1)
       const monthly = total / amort
       for (let m = si; m < si + amort && m < totalMonths; m++) {
-        byMonth[m] += monthly
-        plArr[m]   += monthly
-        if (byCat[ck]) byCat[ck][m] += monthly
+        bookPL(m, monthly)
       }
       applyPaymentPolicy(cashByMonth, si, total, row.payment_policy ?? CASH_POLICY)
       applyPaymentPolicy(cashArr,     si, total, row.payment_policy ?? CASH_POLICY)
@@ -75,9 +79,11 @@ export function calcExpenses(study, expensesData, revenueByMonth) {
 
   return {
     expensesByMonth: byMonth,
+    financeByMonth,
     expensesCashByMonth: cashByMonth,
     expensesByCategory: byCat,
     expensesPLByName,
     expensesCashByName,
+    financeExpenseNames,
   }
 }

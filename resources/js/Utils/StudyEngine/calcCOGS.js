@@ -124,7 +124,7 @@ export function calcCOGS(study, cogsData, revenueByProduct, volumeByProduct, pro
 
   // ── Map the global product index (pi) to mfg-only index (mpi) ──
   let mfgCounter = -1
-  console.log(cogsData)
+  let openingInventoryValue = 0
 
   for (let pi = 0; pi < cogsData.length; pi++) {
     const cog     = cogsData[pi]
@@ -374,6 +374,7 @@ export function calcCOGS(study, cogsData, revenueByProduct, volumeByProduct, pro
             if (rm._rmInvQty === undefined) {
               rm._rmInvQty = Number(rm.beg_inventory_qty   || 0)
               rm._rmInvVal = Number(rm.beg_inventory_value || 0) || (rm._rmInvQty * cpu)
+              openingInventoryValue += rm._rmInvVal
             }
 
             // Target RM end stock = next month's dispersion × coverage ratio
@@ -538,7 +539,8 @@ export function calcCOGS(study, cogsData, revenueByProduct, volumeByProduct, pro
 
       // Running inventory state (carry across months)
       let invQty = Number(cog.beginning_inventory_units) || 0
-      let invVal = Number(cog.beginning_inventory_value) || 0
+      let invVal = Number(cog.beginning_inventory_value) || (invQty * (Number(cog.unit_purchase_cost) || 0))
+      openingInventoryValue += invVal
 
       // Pre-compute average monthly volume of the last 12 months of the study.
       // Used as a proxy for "next month's sales" when in the final month so that
@@ -696,5 +698,6 @@ export function calcCOGS(study, cogsData, revenueByProduct, volumeByProduct, pro
     ohUnabsorbedByMonth,
     rmPaymentsByName,
     ohPaymentsByName,
+    openingInventoryValue,
   }
 }

@@ -30,6 +30,7 @@ export function calcFixedAssets(study, fixedAssetsData, productNames) {
   const grossFAArr  = new Array(totalMonths).fill(0)
   const accumDepArr = new Array(totalMonths).fill(0)
   const loanBalArr  = new Array(totalMonths).fill(0)
+  const capIntByMonth = new Array(totalMonths).fill(0)
 
   for (const asset of (fixedAssetsData ?? [])) {
     const total = Number(asset.total) || 0
@@ -37,7 +38,7 @@ export function calcFixedAssets(study, fixedAssetsData, productNames) {
 
     const depDur    = Number(asset.depreciation_duration) || 0
     const adminPct  = (Number(asset.admin_dep_pct) || 0) / 100
-    const mfgPct    = (Number(asset.mfg_dep_pct)  || 100) / 100
+    const mfgPct    = (asset.mfg_dep_pct != null && asset.mfg_dep_pct !== '' ? Number(asset.mfg_dep_pct) : 100) / 100
     const equityPct = (asset.equity_pct != null ? Number(asset.equity_pct) : 0) / 100
     const debtPct   = (asset.debt_pct   != null
       ? Number(asset.debt_pct)
@@ -143,6 +144,7 @@ export function calcFixedAssets(study, fixedAssetsData, productNames) {
       }
     }
     const grossFA    = total + capInt
+    if (capInt > 0 && pupEn < totalMonths) capIntByMonth[pupEn] += capInt
     const monthlyDep = depDur > 0 ? grossFA / depMo : 0
 
     // ── Depreciation ──────────────────────────────────────────────────────
@@ -218,9 +220,9 @@ export function calcFixedAssets(study, fixedAssetsData, productNames) {
   // ── Cumulative BS arrays ──────────────────────────────────────────────────
   let gR = 0, aR = 0, lR = 0
   for (let m = 0; m < totalMonths; m++) {
-    gR += capexCashByMonth[m]
+    gR += capexCashByMonth[m] + capIntByMonth[m]
     aR += depByMonth[m]
-    lR  = Math.max(0, lR + loanDrawdownByMonth[m] - loanRepayByMonth[m])
+    lR  = Math.max(0, lR + loanDrawdownByMonth[m] + capIntByMonth[m] - loanRepayByMonth[m])
     grossFAArr[m]  = gR
     accumDepArr[m] = aR
     loanBalArr[m]  = lR

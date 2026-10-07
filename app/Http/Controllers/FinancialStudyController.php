@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\PortfolioCompany;
+use App\Services\StudyOpeningBalanceSync;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
@@ -406,12 +407,16 @@ class FinancialStudyController extends Controller
             'submit_button' => 'required|string|in:save,next',
         ]);
 
+        $cogsData = StudyOpeningBalanceSync::autoFillCogsOpeningValues($request->input('cogs_data') ?? []);
+
         DB::table('financial_studies')
             ->where('id', $studyId)
             ->update([
-                'cogs_data'  => json_encode($request->input('cogs_data')),
+                'cogs_data'  => json_encode($cogsData),
                 'updated_at' => now(),
             ]);
+
+        StudyOpeningBalanceSync::applyInventory((int) $studyId);
 
         if ($request->input('submit_button') === 'next') {
             return response()->json([
@@ -644,160 +649,6 @@ class FinancialStudyController extends Controller
 
 
 
-// ═══════════════════════════════════════════════════════════════════
-// ADD THESE TWO METHODS TO FinancialStudyController.php
-// ═══════════════════════════════════════════════════════════════════
-
-  
-// ═══════════════════════════════════════════════════════════════════
-// REPLACE the two opening balance methods in FinancialStudyController.php
-// with these fixed versions
-// ═══════════════════════════════════════════════════════════════════
-
-    // ── Step 7: Opening Balance ───────────────────────────────────────
-    public function openingBalanceStep($companyId, $studyId)
-    {
-        $this->authorizeStudy((int) $companyId);
-        $company = \DB::table('portfolio_companies')->where('id', $companyId)->first();
-        $study   = \DB::table('financial_studies')->where('id', $studyId)->first();
-
-        if (!$company || !$study) abort(404);
-
-        // ── FIX 1: new_company lives inside financial_studies.general_assumptions JSON
-        //    NOT in portfolio_companies.company_phase column
-        $generalAssumptions = json_decode($study->general_assumptions ?? '{}', true) ?? [];
-        $isNewCompany = $generalAssumptions['new_company'] ?? true;
-        $phase = $isNewCompany ? 'new' : 'existing';
-
-        // ── FIX 2: use the study's own currency, not the company's base_currency
-        $studyCurrency = $study->study_currency ?? 'USD';
-
-        // Saved opening balance data (if user already filled this step)
-        $savedData = $study->opening_balance
-            ? json_decode($study->opening_balance, true)
-            : null;
-
-        // For existing companies — try to load the latest balance sheet
-        $latestStatement  = null;
-        $balanceSheetData = null;
-
-        if ($phase === 'existing') {
-            // Get the most recent financial statement for this company
-            $latestStatement = \DB::table('financial_statements')
-                ->where('portfolio_company_id', $companyId)
-                ->orderBy('period_to', 'desc')
-                ->first();
-
-            if ($latestStatement) {
-                // Load all balance sheet sections + line items
-                $sections = \DB::table('fs_sections')
-                    ->where('financial_statement_id', $latestStatement->id)
-                    ->where('statement_type', 'balance_sheet')
-                    ->orderBy('sort_order')
-                    ->get();
-
-                $bsData = [];
-                foreach ($sections as $section) {
-                    $items = \DB::table('fs_line_items')
-                        ->where('fs_section_id', $section->id)
-                        ->orderBy('sort_order')
-                        ->get()
-                        ->map(function ($i) {
-                            // Fetch settlement schedule for this line item (if any)
-                            $schedule = \DB::table('fs_settlement_schedules')
-                                ->where('fs_line_item_id', $i->id)
-                                ->orderBy('month')
-                                ->get()
-                                ->map(fn($s) => [
-                                    'month'  => $s->month,
-                                    'amount' => (float) $s->amount,
-                                    'notes'  => $s->notes ?? null,
-                                ])
-                                ->toArray();
-
-                            return [
-                                'id'       => $i->id,
-                                'label'    => $i->label,
-                                'amount'   => (float) $i->amount,
-                                'schedule' => $schedule,          // monthly settlement rows
-                                'scheduled_total' => array_sum(array_column($schedule, 'amount')),
-                            ];
-                        })
-                        ->toArray();
-
-                    $bsData[] = [
-                        'section_key' => $section->section_key,
-                        'label'       => $section->display_name,
-                        'computed'    => (bool) $section->is_computed,
-                        'items'       => $items,
-                    ];
-                }
-                $balanceSheetData = $bsData;
-            }
-        }
-
-        return \Inertia\Inertia::render('FinancialStudies/OpeningBalanceStep', [
-            'company'          => [
-                'id'            => $company->id,
-                'name'          => $company->name,
-                'currency'      => $studyCurrency,   // ← FIX 2: study currency
-                'company_phase' => $phase,            // ← FIX 1: from general_assumptions
-            ],
-            'study'            => [
-                'id'   => $study->id,
-                'name' => $study->name,
-            ],
-            'latestStatement'  => $latestStatement ? [
-                'id'          => $latestStatement->id,
-                'period_from' => $latestStatement->period_from,
-                'period_to'   => $latestStatement->period_to,
-                'notes'       => $latestStatement->notes,
-            ] : null,
-            'balanceSheetData' => $balanceSheetData,
-            'savedData'        => $savedData,
-        ]);
-    }
-
-    public function saveOpeningBalanceStep(Request $request, $companyId, $studyId)
-    {
-        $this->authorizeStudy((int) $companyId);
-        $study = \DB::table('financial_studies')->where('id', $studyId)->first();
-        if (!$study) abort(404);
-
-        $validated = $request->validate([
-            'sections'   => 'nullable|array',
-            'source'     => 'nullable|string|in:auto,manual,none',
-            'as_of_date' => 'nullable|date',
-            'notes'      => 'nullable|string|max:1000',
-        ]);
-
-        $data = [
-            'source'     => $validated['source']     ?? 'manual',
-            'as_of_date' => $validated['as_of_date'] ?? null,
-            'notes'      => $validated['notes']       ?? null,
-            'sections'   => $validated['sections']   ?? [],
-        ];
-
-        \DB::table('financial_studies')
-            ->where('id', $studyId)
-            ->update([
-                'opening_balance' => json_encode($data),
-                'updated_at'      => now(),
-            ]);
-
-        return response()->json([
-            'success'  => true,
-            'redirect' => route('financial-studies.results', [$companyId, $studyId]),
-        ]);
-    }
- 
-   
-
-    // ═══════════════════════════════════════════════════════════════════════════
-//  FILE 1: Add this method to FinancialStudyController.php
-//  Place it after openingBalanceStep() / saveOpeningBalanceStep()
-// ═══════════════════════════════════════════════════════════════════════════
-
     // ── Step 8: Results ───────────────────────────────────────────────────────
     public function resultsStep($companyId, $studyId)
     {
@@ -858,57 +709,6 @@ class FinancialStudyController extends Controller
             'rawMaterials'    => $rawMaterials,
         ]);
     }
-
-
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  FILE 3: Update the redirect in saveOpeningBalanceStep()
-//  Find this line:
-//      'redirect' => route('financial-studies.report', [$companyId, $studyId]),
-//  Change it to:
-//      'redirect' => route('financial-studies.results', [$companyId, $studyId]),
-// ═══════════════════════════════════════════════════════════════════════════
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  FILE 4: Update SalesProjection.vue wizardSteps array
-//  The 8th step label should match:
-//
-//  const wizardSteps = [
-//    'Setup & Products',
-//    'Sales Projection',
-//    'COGS',
-//    'Manpower',
-//    'Expenses',
-//    'Fixed Assets',
-//    'Opening Balance',
-//    'Results',          ← Step 8
-//  ]
-//
-//  Also update the "Save & Next" redirect in saveSalesStep() in the controller
-//  to ensure it correctly chains:
-//  Setup → Sales → COGS → Manpower → Expenses → Fixed Assets → Opening Balance → Results
-// ═══════════════════════════════════════════════════════════════════════════
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  HOW THE PROJECTIONS DATA FLOWS
-//  ─────────────────────────────
-//  saveSalesStep() stores: financial_studies.projections = JSON of:
-//    { products: [ { year1_months: [...], year2_months: [...], annual_years: [...], ... } ] }
-//
-//  OR it may store an array directly (old format).
-//  The resultsStep() controller handles BOTH formats above.
-//
-//  The Vue engine (StudyResultsEngine.js) expects:
-//    projections = { products: [ {...}, {...} ] }
-//  So the controller normalises it before passing to Inertia.
-// ═══════════════════════════════════════════════════════════════════════════
-   
-
-   
-
 
 
 

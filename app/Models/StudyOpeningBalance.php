@@ -100,12 +100,16 @@ class StudyOpeningBalance extends Model
         $this->total_other_non_current      = $sumArr($this->other_non_current      ?? []);
         $this->total_long_term_liabilities  = $sumArr($this->long_term_liabilities  ?? []);
         $this->total_current_liabilities    = $sumArr($this->current_liabilities    ?? []);
-        $this->total_equity                 = $sumArr($this->equity                 ?? []);
+        $this->total_equity                 = $sumArr($this->equity                 ?? [])
+                                 + (float) $this->paid_up_capital
+                                 + (float) $this->legal_reserve
+                                 + (float) $this->retained_earnings;
 
         $this->total_assets      = $this->total_net_fa
                                  + $this->total_other_non_current
                                  + $this->total_inventory
-                                 + $this->total_current_assets;
+                                 + $this->total_current_assets
+                                 + (float) $this->cash_bank;
 
         $this->total_liabilities = $this->total_long_term_liabilities
                                  + $this->total_current_liabilities;

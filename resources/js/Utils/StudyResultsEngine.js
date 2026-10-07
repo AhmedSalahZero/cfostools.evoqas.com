@@ -22,6 +22,7 @@ import { calcCOGS }         from './StudyEngine/calcCOGS.js'
 import { calcManpower }     from './StudyEngine/calcManpower.js'
 import { calcExpenses }     from './StudyEngine/calcExpenses.js'
 import { calcFixedAssets }  from './StudyEngine/calcFixedAssets.js'
+import { buildOpeningFlows, rowsOf } from './StudyEngine/openingBalance.js'
 import {
   calcVATPayable,
   buildPL,
@@ -64,6 +65,11 @@ export function runStudy(data) {
   const manpower = calcManpower(study, manpowerData)
   const expenses = calcExpenses(study, expensesData, revenue.revenueByMonth)
   const fa       = calcFixedAssets(study, fixedAssetsData, productNames)
+  const opening  = buildOpeningFlows(openingBalance, revenue.timeline)
+  for (let m = 0; m < opening.preDepByMonth.length; m++) {
+    fa.depByMonth[m] += opening.preDepByMonth[m]
+    fa.depAdminByMonth[m] += opening.preDepAdminByMonth[m]
+  }
 
   // Match projections by product NAME (bulletproof against ordering differences)
   const projProductsList = Array.isArray(projections)
@@ -88,17 +94,25 @@ export function runStudy(data) {
   const vatCalc  = calcVATPayable(study.duration_years * 12, revenue.salesVatByMonth, cogsCalc.purchaseVatByMonth)
   const pl       = buildPL(study, revenue, cogsCalc, manpower, expenses, fa)
   const corpTax  = calcCorpTaxBalance(study, pl, revenue)
-  const { cf, requiredEquityTopUp } = buildCashFlow(study, revenue, cogsCalc, manpower, expenses, fa, vatCalc, corpTax, openingCash)
+  const { cf, requiredEquityTopUp } = buildCashFlow(study, revenue, cogsCalc, manpower, expenses, fa, vatCalc, corpTax, openingCash, opening)
 
   const bs = buildBalanceSheet(
     study, pl, cf, fa, revenue, cogsCalc, vatCalc, corpTax, openingBalance, requiredEquityTopUp,
-    { openingPaidUpCapital, openingLegalReserve, openingRetainedEarnings },
+    { openingPaidUpCapital, openingLegalReserve, openingRetainedEarnings }, expenses, opening,
   )
+
+  const obInventory = rowsOf(openingBalance, 'inventory').reduce((s, r) => s + (Number(r.amount) || 0), 0)
+  const cogsOpening = cogsCalc.openingInventoryValue || 0
+  const warnings = []
+  if (obInventory > 0 && Math.abs(obInventory - cogsOpening) > 1) {
+    warnings.push(`Opening inventory on the opening-balance screen (${obInventory}) differs from COGS opening value (${cogsOpening}). The engine uses the COGS figure.`)
+  }
 
   const plByYear = aggregatePLByYear(pl, study.duration_years)
   const cfByYear = aggregateCFByYear(cf, study.duration_years)
   const bsByYear = aggregateBSByYear(bs, study.duration_years)
-  const kpis     = calcKPIs(study, plByYear, cfByYear, fa, openingBalance, requiredEquityTopUp)
+  const openingNwc = cogsOpening + opening.otherCAOpening - opening.clOpening
+  const kpis     = calcKPIs(study, plByYear, cfByYear, fa, openingBalance, requiredEquityTopUp, bsByYear, openingNwc)
 
   const revenueByProductByYear = revenue.revenueByProduct.map(arr =>
     Array.from({ length: study.duration_years }, (_, y) =>
@@ -106,9 +120,11 @@ export function runStudy(data) {
     )
   )
 
+  const financeNameSet = new Set(expenses.financeExpenseNames ?? [])
+
   return {
     pl, cf, bs, plByYear, cfByYear, bsByYear,
-    revenueByProductByYear, kpis,
+    revenueByProductByYear, kpis, warnings,
     timeline: revenue.timeline, productNames,
     currency: study.study_currency || 'USD',
     durationYears: study.duration_years,
@@ -125,10 +141,18 @@ export function runStudy(data) {
       })),
     },
     expenseBreakdownMeta: {
-      plItems: Object.keys(expenses.expensesPLByName ?? {}).map(name => ({
-        name,
-        plKey: makePLExpenseKey(name),
-      })),
+      plItems: Object.keys(expenses.expensesPLByName ?? {})
+        .filter(name => !financeNameSet.has(name))
+        .map(name => ({
+          name,
+          plKey: makePLExpenseKey(name),
+        })),
+      financePlItems: Object.keys(expenses.expensesPLByName ?? {})
+        .filter(name => financeNameSet.has(name))
+        .map(name => ({
+          name,
+          plKey: makePLExpenseKey(name),
+        })),
       cashItems: Object.keys(expenses.expensesCashByName ?? {}).map(name => ({
         name,
         cashKey: makeExpenseKey(name),

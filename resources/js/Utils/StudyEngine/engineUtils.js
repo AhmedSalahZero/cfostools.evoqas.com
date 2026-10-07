@@ -16,6 +16,11 @@ export function toYM(s) {
   return String(s).slice(0, 7)
 }
 
+/** 0-indexed calendar month of the study start. Reads the string (no Date: avoids TZ shifts). */
+export function startMonthIndex(study) {
+  return parseInt(String(study?.study_start_date ?? '').slice(5, 7), 10) - 1
+}
+
 export function monthDiff(startYM, endYM) {
   const [sy, sm] = startYM.split('-').map(Number)
   const [ey, em] = endYM.split('-').map(Number)

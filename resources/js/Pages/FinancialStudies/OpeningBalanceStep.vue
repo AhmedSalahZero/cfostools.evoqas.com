@@ -232,8 +232,8 @@
                 </div>
                 <div class="relative">
                   <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-white text-xs">{{ currency }}</span>
-                  <input v-model.number="inv.amount" type="number" min="0" step="0.01" placeholder="0"
-                    class="bg-mp-card-hover border border-mp-border rounded-lg pl-9 pr-3 py-2 text-sm text-white text-right w-44 focus:outline-none focus:ring-1 focus:ring-mp-teal"/>
+                  <input :value="inv.amount" type="number" min="0" step="0.01" placeholder="0" readonly disabled
+                    class="bg-mp-card-hover border border-mp-border rounded-lg pl-9 pr-3 py-2 text-sm text-white text-right w-44 opacity-70 cursor-not-allowed"/>
                 </div>
                 <div class="w-8 text-center text-white text-xs">🔒</div>
               </div>
@@ -746,7 +746,9 @@ function buildInventoryRows() {
       const rawMaterials = cogsProd?.raw_materials ?? []
 
       rawMaterials.forEach(rm => {
+        const rmQty = parseFloat(rm.beg_inventory_qty || 0)
         const rmVal = parseFloat(rm.beg_inventory_value || 0)
+          || (rmQty * parseFloat(rm.cost_per_unit || 0))
         if (rmVal > 0 || rm.name) {  // include even if zero so user can see/edit
           rows.push({
             type:         'manufacturing_rm',
@@ -763,7 +765,9 @@ function buildInventoryRows() {
       // ── Trading Inventory — from CogsStep.vue ────────────────────────
       // Field: cogsForm[pi].beginning_inventory_value
       const cogsProd   = cogsData.find(c => c.name === prod.name) ?? cogsData[pi] ?? null
+      const tradingUnits = parseFloat(cogsProd?.beginning_inventory_units || 0)
       const tradingVal = parseFloat(cogsProd?.beginning_inventory_value || 0)
+        || (tradingUnits * parseFloat(cogsProd?.unit_purchase_cost || 0))
 
       rows.push({
         type:         'trading',
@@ -817,13 +821,7 @@ onMounted(() => {
       }
     })
 
-    // Restore inventory amounts (user may have overridden)
-    if (Array.isArray(props.savedData.inventory)) {
-      props.savedData.inventory.forEach(saved => {
-        const match = inventoryRows.value.find(r => r.label === saved.label)
-        if (match) match.amount = parseFloat(saved.amount) || 0
-      })
-    }
+    // Inventory is always derived from COGS / sales steps (B14). Do not restore saved overrides.
   }
 })
 

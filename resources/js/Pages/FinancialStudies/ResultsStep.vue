@@ -146,6 +146,10 @@
           <p class="text-white text-sm">Running financial model…</p>
         </div>
 
+        <div v-if="results?.warnings?.length" class="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <p v-for="(w, i) in results.warnings" :key="i">{{ w }}</p>
+        </div>
+
         <!-- ════════════════════════════════════════════════════════
              KPI SUMMARY CARDS
         ════════════════════════════════════════════════════════ -->
@@ -828,6 +832,9 @@ const plRows = computed(() => {
     { label: 'EBIT',                  key: 'ebit' },
     { type: 'spacer' },
     { type: 'section',  label: 'Finance' },
+    ...(results.value?.expenseBreakdownMeta?.financePlItems ?? []).map(e => ({
+      label: e.name, key: e.plKey, isNeg: true, indent: 1, isSub: true,
+    })),
     { label: 'Finance Costs',         key: 'finCost',         isNeg: true, indent: 1 },
     { label: 'EBT (Pre-Tax)',          key: 'ebt' },
     { label: 'Income Tax',            key: 'tax',             isNeg: true, indent: 1 },
@@ -871,6 +878,8 @@ const cfRows = computed(() => {
   return [
     { type: 'section', label: 'Operating Activities' },
     { label: 'Cash Receipts from Customers',     key: 'receipts',       positiveGreen: true },
+    { label: 'Collection of Opening Receivables', key: 'openingReceipts', positiveGreen: true },
+    { label: 'Payment of Opening Payables',      key: 'openingPayablesPaid', isNeg: true },
     ...supplierRows,
     { label: 'Net VAT Paid to Authority',        key: 'vatPaid',        isNeg: true },
     { label: 'Credit WHT Paid (Quarterly)',      key: 'creditWhtPaid',  isNeg: true },
@@ -888,6 +897,7 @@ const cfRows = computed(() => {
     { label: 'Equity Injection',                 key: 'equityInjection', positiveGreen: true },
     { label: 'Loan Drawdowns',                   key: 'loanDrawdown',   positiveGreen: true },
     { label: 'Loan Repayments',                  key: 'loanRepay',      isNeg: true },
+    { label: 'Repayment of Opening Long-term Debt', key: 'openingDebtPaid', isNeg: true },
     { type: 'total', label: 'Net Financing CF',        key: 'financingCF',   positiveGreen: false },
     { type: 'spacer' },
     { type: 'total', label: 'Net Change in Cash',      key: 'netCF',         positiveGreen: true },
@@ -902,12 +912,16 @@ const bsRows = [
   { label: 'Gross Fixed Assets',             key: 'grossFA',              indent: 1 },
   { label: 'Accumulated Depreciation',       key: 'accumDep',             indent: 1, isNeg: true },
   { type: 'subtotal', label: 'Net Fixed Assets',                          key: 'netFA' },
+  { label: 'Other Non-Current Assets',       key: 'otherNCA',             indent: 1, positiveGreen: true },
   { type: 'spacer' },
   // ── CURRENT ASSETS ──
   { type: 'section',  label: 'Current Assets' },
   { label: 'Cash & Bank',                    key: 'cash',                 indent: 1, positiveGreen: true },
   { label: 'Customers Receivable (AR)',      key: 'ar',                   indent: 1, positiveGreen: true },
+  { label: 'Opening Receivables / Other CA', key: 'otherCA',              indent: 1, positiveGreen: true },
   { label: 'Trading Inventory',              key: 'inventory',            indent: 1, positiveGreen: true },
+  { label: 'Prepaid Expenses',               key: 'prepaidExp',           indent: 1, positiveGreen: true },
+  { label: 'VAT Receivable',                 key: 'vatReceivable',        indent: 1, positiveGreen: true },
   { label: 'Corporate Tax Prepayment',       key: 'corpTaxPrepayment',    indent: 1, positiveGreen: true },
   { type: 'subtotal', label: 'Total Current Assets',                      key: 'totalCurrentAssets' },
   { type: 'spacer' },
@@ -920,6 +934,8 @@ const bsRows = [
   // ── CURRENT LIABILITIES ──
   { type: 'section',  label: 'Current Liabilities' },
   { label: 'Suppliers Payable (AP)',         key: 'ap',                   indent: 1 },
+  { label: 'Opening Payables',               key: 'openCLRemaining',      indent: 1 },
+  { label: 'Accrued Expenses',               key: 'accruedExp',           indent: 1 },
   { label: 'Net VAT Payable',               key: 'vatPayable',           indent: 1 },
   { label: 'Corporate Tax Payable',         key: 'corpTaxPayable',       indent: 1 },
   { label: 'Credit WHT Payable',            key: 'creditWhtPayable',     indent: 1 },
@@ -1131,6 +1147,7 @@ async function exportExcel() {
       { label: 'EBIT',                           key: 'ebit' },
       { spacer: true },
       { section: 'Finance' },
+      ...(r.expenseBreakdownMeta?.financePlItems ?? []).map(e => ({ label: `  ${e.name}`, key: e.plKey })),
       { label: '  Finance Costs',                key: 'finCost' },
       { label: 'EBT (Pre-Tax)',                  key: 'ebt' },
       { label: '  Income Tax',                   key: 'tax' },
@@ -1147,11 +1164,15 @@ async function exportExcel() {
       { label: '  Gross Fixed Assets',           key: 'grossFA' },
       { label: '  Accumulated Depreciation',     key: 'accumDep' },
       { label: 'Net Fixed Assets',               key: 'netFA' },
+      { label: '  Other Non-Current Assets',     key: 'otherNCA' },
       { spacer: true },
       { section: 'Current Assets' },
       { label: '  Cash & Bank',                  key: 'cash' },
       { label: '  Customers Receivable (AR)',    key: 'ar' },
+      { label: '  Opening Receivables / Other CA', key: 'otherCA' },
       { label: '  Trading Inventory',            key: 'inventory' },
+      { label: '  Prepaid Expenses',             key: 'prepaidExp' },
+      { label: '  VAT Receivable',               key: 'vatReceivable' },
       { label: '  Corporate Tax Prepayment',     key: 'corpTaxPrepayment' },
       { label: 'Total Current Assets',           key: 'totalCurrentAssets' },
       { spacer: true },
@@ -1162,6 +1183,8 @@ async function exportExcel() {
       { spacer: true },
       { section: 'Current Liabilities' },
       { label: '  Suppliers Payable (AP)',        key: 'ap' },
+      { label: '  Opening Payables',             key: 'openCLRemaining' },
+      { label: '  Accrued Expenses',             key: 'accruedExp' },
       { label: '  Net VAT Payable',              key: 'vatPayable' },
       { label: '  Corporate Tax Payable',        key: 'corpTaxPayable' },
       { label: '  Credit WHT Payable',           key: 'creditWhtPayable' },
@@ -1208,6 +1231,8 @@ async function exportExcel() {
     const cfRowDefs = [
       { section: 'Operating Activities' },
       { label: '  Cash Receipts from Customers',  key: 'receipts' },
+      { label: '  Collection of Opening Receivables', key: 'openingReceipts' },
+      { label: '  Payment of Opening Payables',   key: 'openingPayablesPaid' },
       ...cfSupplierXlsRows,
       { label: '  Net VAT Paid to Authority',     key: 'vatPaid' },
       { label: '  Credit WHT Paid (Quarterly)',   key: 'creditWhtPaid' },
@@ -1225,6 +1250,7 @@ async function exportExcel() {
       { label: '  Equity Injection',              key: 'equityInjection' },
       { label: '  Loan Drawdowns',                key: 'loanDrawdown' },
       { label: '  Loan Repayments',               key: 'loanRepay' },
+      { label: '  Repayment of Opening Long-term Debt', key: 'openingDebtPaid' },
       { label: 'Net Financing CF',                key: 'financingCF' },
       { spacer: true },
       { label: 'Net Change in Cash',              key: 'netCF' },

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\StudyOpeningBalance;
 use App\Models\PortfolioCompany;
+use App\Services\StudyOpeningBalanceSync;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -120,7 +121,7 @@ class OpeningBalanceController extends Controller
         $ob->retained_earnings      = (float) ($request->retained_earnings ?? 0);
         // Array sections
         $ob->fixed_assets           = $request->fixed_assets           ?? [];
-        $ob->inventory              = $request->inventory              ?? [];
+        $ob->inventory              = StudyOpeningBalanceSync::inventoryRowsFromStudy($study);
         $ob->current_assets         = $request->current_assets         ?? [];
         $ob->other_non_current      = $request->other_non_current      ?? [];
         $ob->long_term_liabilities  = $request->long_term_liabilities  ?? [];
@@ -130,45 +131,7 @@ class OpeningBalanceController extends Controller
         // Compute and store all decimal totals + is_balanced flag
         $ob->computeTotals();
         $ob->save();
-
-        // Also keep the financial_studies.opening_balance JSON column in sync
-        // so the Results Engine (which reads that column) still works
-        DB::table('financial_studies')
-            ->where('id', $studyId)
-            ->update([
-                'opening_balance' => json_encode([
-                    'source'                 => 'manual',
-                    'as_of_date'             => $ob->as_of_date?->format('Y-m-d'),
-                    'notes'                  => $ob->notes,
-                    // Dedicated scalar fields — read directly by engine
-                    'cash_bank'              => (float) $ob->cash_bank,
-                    'paid_up_capital'        => (float) $ob->paid_up_capital,
-                    'legal_reserve'          => (float) $ob->legal_reserve,
-                    'retained_earnings'      => (float) $ob->retained_earnings,
-                    'fixed_assets'           => $ob->fixed_assets,
-                    'inventory'              => $ob->inventory,
-                    'current_assets'         => $ob->current_assets,
-                    'other_non_current'      => $ob->other_non_current,
-                    'long_term_liabilities'  => $ob->long_term_liabilities,
-                    'current_liabilities'    => $ob->current_liabilities,
-                    'equity'                 => $ob->equity,
-                    'totals'                 => [
-                        'gross_fa'                  => (float) $ob->total_gross_fa,
-                        'accum_dep'                 => (float) $ob->total_accum_dep,
-                        'net_fa'                    => (float) $ob->total_net_fa,
-                        'inventory'                 => (float) $ob->total_inventory,
-                        'current_assets'            => (float) $ob->total_current_assets,
-                        'other_non_current'         => (float) $ob->total_other_non_current,
-                        'long_term_liabilities'     => (float) $ob->total_long_term_liabilities,
-                        'current_liabilities'       => (float) $ob->total_current_liabilities,
-                        'equity'                    => (float) $ob->total_equity,
-                        'total_assets'              => (float) $ob->total_assets,
-                        'total_liabilities'         => (float) $ob->total_liabilities,
-                    ],
-                    'is_balanced' => $ob->is_balanced,
-                ]),
-                'updated_at' => now(),
-            ]);
+        StudyOpeningBalanceSync::writeStudyJson($studyId, $ob);
 
         return response()->json([
             'success'  => true,

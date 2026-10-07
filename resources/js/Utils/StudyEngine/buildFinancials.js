@@ -16,7 +16,9 @@
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
-import { toYM, makeSupplierPaymentKey, makeExpenseKey, makePLExpenseKey } from './engineUtils.js'
+import { toYM, startMonthIndex, makeSupplierPaymentKey, makeExpenseKey, makePLExpenseKey } from './engineUtils.js'
+
+const TAX_LOSS_CARRY_YEARS = 5
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  STEP 6 — VAT PAYABLE
@@ -62,21 +64,41 @@ export function buildPL(study, revenue, cogs, manpower, expenses, fa) {
     const opexCost      = expenses.expensesByMonth[m] || 0
     const adminDep      = fa.depAdminByMonth[m]       || 0
     const ohUnabsorbed  = cogs.ohUnabsorbedByMonth?.[m] || 0
-    const ebitda        = grossProfit - (manpowerCost + opexCost + ohUnabsorbed) + mfgDep + adminDep
+    const ebitda        = grossProfit - (manpowerCost + opexCost + ohUnabsorbed) + mfgDep
     const ebit          = ebitda - (mfgDep + adminDep)
-    const finCost       = fa.loanInterestByMonth[m] || 0
+    const finCost       = (fa.loanInterestByMonth[m] || 0) + (expenses.financeByMonth?.[m] || 0)
     const ebt           = ebit - finCost
     ebtByMonth.push({ rev, cogsCost, mfgDep, totalCogs, grossProfit, manpowerCost, opexCost, ohUnabsorbed, adminDep, ebitda, ebit, finCost, ebt })
   }
 
-  // Second pass: book tax in December of each year
+  // Second pass: book tax at calendar year-end (December) and at the last study month.
+  // Losses carry forward for TAX_LOSS_CARRY_YEARS (Egyptian CIT: 5 years).
+  let lossPool = []
+  const startM0 = startMonthIndex(study)
   for (let m = 0; m < totalMonths; m++) {
     const e = ebtByMonth[m]
     let tax = 0
-    if ((m + 1) % 12 === 0) {
-      const yearStart = m - 11
+    const calM = (startM0 + m) % 12
+    if (calM === 11 || m === totalMonths - 1) {
+      const yearStart = Math.max(0, m - calM)
       const annualEBT = ebtByMonth.slice(yearStart, m + 1).reduce((s, x) => s + x.ebt, 0)
-      tax = annualEBT > 0 ? annualEBT * taxRate : 0
+      const calYear = parseInt(String(study.study_start_date).slice(0, 4), 10)
+        + Math.floor((startM0 + m) / 12)
+      lossPool = lossPool.filter(l => l.expiresYear >= calYear)
+      if (annualEBT < 0) {
+        lossPool.push({ remain: -annualEBT, expiresYear: calYear + TAX_LOSS_CARRY_YEARS })
+        tax = 0
+      } else {
+        let taxable = annualEBT
+        for (const l of lossPool) {
+          if (taxable <= 0) break
+          const use = Math.min(l.remain, taxable)
+          l.remain -= use
+          taxable -= use
+        }
+        lossPool = lossPool.filter(l => l.remain > 0)
+        tax = taxable * taxRate
+      }
     }
     const netProfit   = e.ebt - tax
     const cogsDetail  = cogs.cogsByProductDetail.map(d => ({
@@ -127,7 +149,7 @@ export function calcCorpTaxBalance(study, pl, revenue) {
 
   for (let m = 0; m < totalMonths; m++) {
     runningBal -= (revenue.debitWhtByMonth[m] || 0)
-    if ((m + 1) % 12 === 0) runningBal += pl[m].tax
+    runningBal += pl[m].tax
     const calMonth = (startMonth + m) % 12
     if (calMonth === 3 && runningBal > 0) {
       corpTaxPaidByMonth[m] = runningBal
@@ -142,7 +164,7 @@ export function calcCorpTaxBalance(study, pl, revenue) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  STEP 9 — CASH FLOW (2-pass: find min cash, inject equity)
 // ─────────────────────────────────────────────────────────────────────────────
-export function buildCashFlow(study, revenue, cogs, manpower, expenses, fa, vatCalc, corpTax, openingCash) {
+export function buildCashFlow(study, revenue, cogs, manpower, expenses, fa, vatCalc, corpTax, openingCash, opening = null) {
   const totalMonths     = study.duration_years * 12
   const rmPaymentNames  = Object.keys(cogs.rmPaymentsByName ?? {})
   const ohPaymentNames  = Object.keys(cogs.ohPaymentsByName ?? {})
@@ -164,16 +186,20 @@ export function buildCashFlow(study, revenue, cogs, manpower, expenses, fa, vatC
       const loanIn       = fa.loanDrawdownByMonth[m]         || 0
       const loanOut      = fa.loanRepayByMonth[m]            || 0
       const inject       = m === 0 ? injection : 0
+      const openRec      = opening?.receiptsByMonth[m]       || 0
+      const openCLPaid   = opening?.clPaymentsByMonth[m]     || 0
+      const openLTPaid   = opening?.ltPaymentsByMonth[m]     || 0
 
-      const operatingCF = rec - vatOut - cogsP - creditWhtOut - manP - expP - corpTaxOut
+      const operatingCF = rec + openRec - openCLPaid - vatOut - cogsP - creditWhtOut - manP - expP - corpTaxOut
       const investingCF = -capex
-      const financingCF = loanIn - loanOut + inject
+      const financingCF = loanIn - loanOut + inject - openLTPaid
       const netCF       = operatingCF + investingCF + financingCF - intP
       cum += netCF
 
       cf.push({
         month: m,
-        receipts: rec, vatPaid: vatOut, cogsPaid: cogsP,
+        receipts: rec, openingReceipts: openRec, openingPayablesPaid: openCLPaid, openingDebtPaid: openLTPaid,
+        vatPaid: vatOut, cogsPaid: cogsP,
         creditWhtPaid: creditWhtOut, manpowerPaid: manP, expensesPaid: expP,
         corpTaxPaid: corpTaxOut, interestPaid: intP, operatingCF,
         capexPaid: capex, investingCF,
@@ -208,19 +234,15 @@ function calcPreExistingDep(fixedAssets, m) {
   }, 0)
 }
 
-function calcSettlementRemaining(rows, m) {
-  return (rows ?? []).reduce((sum, row) => {
-    const startBal  = Number(row.amount || 0)
-    const schedule  = row.schedule ?? []
-    const paidSoFar = schedule.slice(0, m + 1).reduce((s, sl) => s + (Number(sl.amount) || 0), 0)
-    return sum + Math.max(0, startBal - paidSoFar)
-  }, 0)
+function operatingNwc(b) {
+  return (b.ar || 0) + (b.inventory || 0) + (b.vatReceivable || 0) + (b.prepaidExp || 0) + (b.otherCA || 0)
+    - (b.ap || 0) - (b.accruedExp || 0) - (b.openCLRemaining || 0)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  STEP 10 — BALANCE SHEET (monthly)
 // ─────────────────────────────────────────────────────────────────────────────
-export function buildBalanceSheet(study, pl, cf, fa, revenue, cogs, vatCalc, corpTax, openingBalance, requiredEquityTopUp, openingEquity = {}) {
+export function buildBalanceSheet(study, pl, cf, fa, revenue, cogs, vatCalc, corpTax, openingBalance, requiredEquityTopUp, openingEquity = {}, expensesCalc = null, opening = null) {
   const totalMonths = study.duration_years * 12
   const { openingPaidUpCapital = 0, openingLegalReserve = 0, openingRetainedEarnings = 0 } = openingEquity
 
@@ -230,13 +252,14 @@ export function buildBalanceSheet(study, pl, cf, fa, revenue, cogs, vatCalc, cor
     : ((ob.sections?.non_current_assets ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0))
 
   const paidUpCapital    = openingPaidUpCapital + requiredEquityTopUp
-  const corporateTaxRate = Number(study.corporate_tax_rate || 0) / 100
 
   let legalReserveAccum = openingLegalReserve
   const legalReserveCap = paidUpCapital * 0.5
+  const startM0 = startMonthIndex(study)
 
   const bs = []
   let retainedEarnings = openingRetainedEarnings
+  let cumExpPL = 0, cumExpCash = 0, yearProfit = 0
 
   for (let m = 0; m < totalMonths; m++) {
     const currentProfit = pl[m].netProfit
@@ -250,31 +273,42 @@ export function buildBalanceSheet(study, pl, cf, fa, revenue, cogs, vatCalc, cor
     const ar                = revenue.arByMonth[m]             || 0
     const inventory         = cogs.inventoryByMonth[m]         || 0
     const corpTaxPrepayment = Math.max(0, -(corpTax.corpTaxBalByMonth[m] || 0))
-    const totalCA           = cash + ar + inventory + corpTaxPrepayment
-    const totalAssets       = netFA + totalCA
+    cumExpPL   += (expensesCalc?.expensesByMonth?.[m] || 0) + (expensesCalc?.financeByMonth?.[m] || 0)
+    cumExpCash += expensesCalc?.expensesCashByMonth?.[m] || 0
+    const prepaidExp    = Math.max(0, cumExpCash - cumExpPL)
+    const accruedExp    = Math.max(0, cumExpPL - cumExpCash)
+    const vatReceivable = Math.max(0, -(vatCalc.vatBalByMonth[m] || 0))
+    const otherCA       = opening ? opening.otherCABalance[m] : 0
+    const otherNCA      = opening ? opening.otherNonCurrent : 0
+    const totalCA       = cash + ar + inventory + corpTaxPrepayment + vatReceivable + prepaidExp + otherCA
+    const totalAssets   = netFA + otherNCA + totalCA
 
-    const openLTLRemaining = calcSettlementRemaining(ob.sections?.long_term_liabilities ?? [], m)
+    const openLTLRemaining = opening ? opening.ltBalance[m] : 0
     const longTermDebt     = Math.max(0, fa.loanBalByMonth[m]) + openLTLRemaining
 
-    const openCLRemaining  = calcSettlementRemaining(ob.sections?.current_liabilities ?? [], m)
+    const openCLRemaining  = opening ? opening.clBalance[m] : 0
     const ap               = cogs.apByMonth[m]                 || 0
     const vatPayable       = Math.max(0, vatCalc.vatBalByMonth[m] || 0)
     const corpTaxPayable   = Math.max(0, corpTax.corpTaxBalByMonth[m] || 0)
     const creditWhtPayable = cogs.creditWhtBalByMonth[m]       || 0
 
-    const totalCL   = ap + vatPayable + corpTaxPayable + creditWhtPayable + openCLRemaining
+    const totalCL   = ap + vatPayable + corpTaxPayable + creditWhtPayable + openCLRemaining + accruedExp
     const totalLiab = longTermDebt + totalCL
 
-    const isDecember = (m + 1) % 12 === 0
+    yearProfit += currentProfit
+    const isYearEnd = ((startM0 + m) % 12) === 11
     let legalReserveTransfer = 0
-    if (isDecember && currentProfit > 0 && legalReserveAccum < legalReserveCap) {
-      legalReserveTransfer = Math.min(currentProfit * 0.05, legalReserveCap - legalReserveAccum)
-      legalReserveAccum += legalReserveTransfer
+    if (isYearEnd) {
+      if (yearProfit > 0 && legalReserveAccum < legalReserveCap) {
+        legalReserveTransfer = Math.min(yearProfit * 0.05, legalReserveCap - legalReserveAccum)
+        legalReserveAccum += legalReserveTransfer
+      }
+      yearProfit = 0
     }
 
     const equityPaidUp   = paidUpCapital
     const equityLegalRes = legalReserveAccum
-    const equityRetained = retainedEarnings
+    const equityRetained = retainedEarnings - legalReserveTransfer
     const equityProfit   = currentProfit
     const totalEquity    = equityPaidUp + equityLegalRes + equityRetained + equityProfit
     const totalLiabEq    = totalLiab + totalEquity
@@ -282,7 +316,7 @@ export function buildBalanceSheet(study, pl, cf, fa, revenue, cogs, vatCalc, cor
     bs.push({
       month: m,
       grossFA, accumDep, netFA,
-      cash, ar, inventory, corpTaxPrepayment,
+      cash, ar, inventory, corpTaxPrepayment, vatReceivable, prepaidExp, otherCA, otherNCA, accruedExp,
       totalCurrentAssets: totalCA, totalAssets,
       longTermDebt, openLTLRemaining,
       ap, vatPayable, corpTaxPayable, creditWhtPayable, openCLRemaining,
@@ -344,7 +378,7 @@ export function aggregatePLByYear(pl, n) {
 }
 
 export function aggregateCFByYear(cf, n) {
-  const baseFields = ['receipts','vatPaid','cogsPaid','creditWhtPaid','manpowerPaid','expensesPaid','corpTaxPaid','interestPaid','operatingCF','capexPaid','investingCF','loanDrawdown','loanRepay','equityInjection','financingCF','netCF']
+  const baseFields = ['receipts','openingReceipts','openingPayablesPaid','openingDebtPaid','vatPaid','cogsPaid','creditWhtPaid','manpowerPaid','expensesPaid','corpTaxPaid','interestPaid','operatingCF','capexPaid','investingCF','loanDrawdown','loanRepay','equityInjection','financingCF','netCF']
   const dynamicSupplierFields = Object.keys(cf[0] ?? {}).filter(k => k.startsWith('supplierPay_rm_') || k.startsWith('supplierPay_oh_'))
   const dynamicExpenseFields  = Object.keys(cf[0] ?? {}).filter(k => k.startsWith('expensePay_'))
   const yrs = aggYears(cf, [...baseFields, ...dynamicSupplierFields, ...dynamicExpenseFields], n)
@@ -366,7 +400,7 @@ export function aggregateBSByYear(bs, n) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  STEP 12 — KPIs
 // ─────────────────────────────────────────────────────────────────────────────
-export function calcKPIs(study, plByYear, cfByYear, fa, openingBalance, requiredEquityTopUp) {
+export function calcKPIs(study, plByYear, cfByYear, fa, openingBalance, requiredEquityTopUp, bsByYear = [], openingNwc = 0) {
   const wacc       = (Number(study.required_investment_return_pct) || 10) / 100
   const perpGrowth = (Number(study.perpetual_growth_rate_pct) || 3) / 100
   const taxRate    = (Number(study.corporate_tax_rate) || 0) / 100
@@ -376,7 +410,13 @@ export function calcKPIs(study, plByYear, cfByYear, fa, openingBalance, required
 
   const totalInvestment = fa.totalEquityFunded + requiredEquityTopUp + openEq
 
-  const fcff = plByYear.map((y, i) => y.ebit * (1 - taxRate) + y.totalDep - (cfByYear[i]?.capexPaid || 0))
+  let prevNwc = openingNwc
+  const fcff = plByYear.map((y, i) => {
+    const nwc = operatingNwc(bsByYear[i] || {})
+    const dNwc = nwc - prevNwc
+    prevNwc = nwc
+    return y.ebit * (1 - taxRate) + y.totalDep - (cfByYear[i]?.capexPaid || 0) - dNwc
+  })
   const last  = fcff[fcff.length - 1] || 0
   const tv    = wacc > perpGrowth && last > 0 ? (last * (1 + perpGrowth)) / (wacc - perpGrowth) : 0
 
@@ -398,7 +438,7 @@ export function calcKPIs(study, plByYear, cfByYear, fa, openingBalance, required
   const irr = r
 
   const totalR = fcff.reduce((s, f) => s + Math.max(0, f), 0) + Math.max(0, tv)
-  const moic   = totalInvestment > 0 ? (totalR + tv) / totalInvestment : 0
+  const moic   = totalInvestment > 0 ? totalR / totalInvestment : 0
 
   let paybackMonth = null, cum = -totalInvestment
   for (let y = 0; y < fcff.length; y++) {
